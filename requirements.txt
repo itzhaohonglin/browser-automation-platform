@@ -1,0 +1,26 @@
+# Web Framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Browser Automation
+playwright==1.47.0
+
+# Database
+sqlalchemy==2.0.35
+pymysql==1.1.1
+alembic==1.13.2
+
+# Task Scheduling
+apscheduler==3.10.4
+
+# Environment & Utils
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# WebSocket Support
+websockets==13.1
+
+# Async MySQL Driver
+aiomysql==0.2.0
+cryptography==42.0.8
