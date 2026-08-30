@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     """应用配置类"""
 
     # 数据库配置
-    DATABASE_URL: str = "mysql+aiomysql://root:password@localhost:3306/browser_automation"
+    DATABASE_URL: str = "mysql+aiomysql://user:pass@localhost:3306/dbname"  # 请在 .env 中配置实际数据库连接
 
     # 应用配置
     APP_HOST: str = "0.0.0.0"
