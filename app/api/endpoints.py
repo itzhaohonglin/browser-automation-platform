@@ -210,3 +210,48 @@ async def run_tasks(
         "failed_count": failed_count,
         "results": results
     }
+
+
+# ============ 统计数据接口 ============
+
+@router.get("/api/stats", tags=["统计数据"])
+async def get_task_stats(db: AsyncSession = Depends(get_db)):
+    """
+    获取任务统计数据
+
+    返回所有任务的统计信息：总数、成功数、失败数、成功率。
+    用于仪表盘显示任务执行情况概览。
+
+    Returns:
+        统计数据字典（总数、成功数、失败数、成功率）
+    """
+    from sqlalchemy import func
+
+    # 查询总数
+    total_stmt = select(func.count(JobQueue.id))
+    total_result = await db.execute(total_stmt)
+    total = total_result.scalar() or 0
+
+    # 查询成功数
+    success_stmt = select(func.count(JobQueue.id)).where(
+        JobQueue.status == JobStatus.SUCCESS
+    )
+    success_result = await db.execute(success_stmt)
+    success = success_result.scalar() or 0
+
+    # 查询失败数
+    failed_stmt = select(func.count(JobQueue.id)).where(
+        JobQueue.status == JobStatus.FAILED
+    )
+    failed_result = await db.execute(failed_stmt)
+    failed = failed_result.scalar() or 0
+
+    # 计算成功率
+    success_rate = (success / total * 100) if total > 0 else 0.0
+
+    return {
+        "total": total,
+        "success": success,
+        "failed": failed,
+        "success_rate": round(success_rate, 1)
+    }
