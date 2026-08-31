@@ -38,6 +38,52 @@ class PlaywrightExecutor:
         self.ws_manager = ws_manager
         self.logger = logger
 
+    async def _fill_form(
+        self,
+        page: Page,
+        input_configs: List[Dict],
+        query_params: Dict
+    ):
+        """
+        填充表单
+
+        Args:
+            page: 页面对象
+            input_configs: 输入配置列表
+            query_params: 查询参数（用于占位符替换）
+        """
+        self.logger.info(f"开始填充表单，参数: {query_params}")
+
+        for input_cfg in input_configs:
+            selector = input_cfg['selector']
+            value_template = input_cfg['value']
+            input_type = input_cfg.get('type', 'fill')
+
+            # 占位符替换
+            try:
+                value = value_template.format(**query_params)
+            except KeyError as e:
+                raise ValueError(f"占位符替换失败，缺少参数: {e}")
+
+            self.logger.info(f"填充字段: {selector} = {value} (类型: {input_type})")
+
+            try:
+                if input_type == 'fill':
+                    await page.fill(selector, value, timeout=TIMEOUTS['click'])
+                elif input_type == 'select':
+                    await page.select_option(selector, value, timeout=TIMEOUTS['click'])
+                elif input_type == 'check':
+                    await page.check(selector, timeout=TIMEOUTS['click'])
+                else:
+                    self.logger.warning(f"未知的输入类型: {input_type}，使用 fill")
+                    await page.fill(selector, value, timeout=TIMEOUTS['click'])
+            except PlaywrightTimeoutError:
+                raise TimeoutError(f"元素 {selector} 等待超时")
+            except Exception as e:
+                raise Exception(f"填充字段 {selector} 失败: {e}")
+
+        self.logger.info("表单填充完成")
+
     async def _launch_browser(self, config: CrawlerConfig) -> Tuple[Browser, object, object]:
         """
         启动浏览器（根据登录态配置）
@@ -129,12 +175,31 @@ class PlaywrightExecutor:
             await page.goto(config.target_url, timeout=TIMEOUTS['page_load'])
             self.logger.info(f"访问目标 URL: {config.target_url}")
 
-            # TODO: 表单填充、数据提取等后续步骤
+            # 5. 填充表单
+            if config.input_configs:
+                await self._fill_form(page, config.input_configs, job.query_params)
+
+            # 6. 点击提交按钮
+            self.logger.info(f"点击提交按钮: {config.submit_selector}")
+            await page.click(config.submit_selector, timeout=TIMEOUTS['click'])
+
+            # 7. 等待结果加载
+            self.logger.info(f"等待结果加载: {config.wait_selector}")
+            await page.wait_for_selector(
+                config.wait_selector,
+                state="visible",
+                timeout=TIMEOUTS['wait_selector']
+            )
+            await asyncio.sleep(1)  # 额外等待确保数据加载完成
+
+            self.logger.info("结果页面加载完成")
+
+            # TODO: 数据提取和保存
 
             return {
                 "job_id": job_id,
                 "status": "success",
-                "message": "浏览器启动成功"
+                "message": "表单填充和提交成功"
             }
 
         except Exception as e:
