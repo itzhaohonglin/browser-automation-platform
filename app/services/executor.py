@@ -38,6 +38,55 @@ class PlaywrightExecutor:
         self.ws_manager = ws_manager
         self.logger = logger
 
+    async def _broadcast_progress(self, job_id: int, message: str, current: int = None, total: int = None):
+        """
+        推送进度消息
+
+        Args:
+            job_id: 任务 ID
+            message: 进度描述
+            current: 当前进度（可选）
+            total: 总进度（可选）
+        """
+        if not self.ws_manager:
+            return
+
+        payload = {
+            "type": "progress",
+            "job_id": job_id,
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        if current is not None and total is not None:
+            payload["progress"] = {"current": current, "total": total}
+
+        await self.ws_manager.broadcast(payload)
+
+    async def _broadcast_log(self, level: str, message: str, job_id: int = None):
+        """
+        推送日志消息
+
+        Args:
+            level: 日志级别（info/warning/error）
+            message: 日志内容
+            job_id: 任务 ID（可选）
+        """
+        if not self.ws_manager:
+            return
+
+        payload = {
+            "type": "log",
+            "level": level,
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        if job_id is not None:
+            payload["job_id"] = job_id
+
+        await self.ws_manager.broadcast(payload)
+
     async def _fill_form(
         self,
         page: Page,
