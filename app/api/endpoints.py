@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.models.job import JobQueue, JobStatus
 from app.services.executor import PlaywrightExecutor
 from app.services.auth_manager import auth_manager
+from app.api.websocket import websocket_manager
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -178,7 +179,7 @@ async def run_tasks(
     logger.info(f"找到 {len(jobs)} 个待处理任务")
 
     # 2. 创建执行器
-    executor = PlaywrightExecutor()
+    executor = PlaywrightExecutor(ws_manager=websocket_manager)
 
     # 3. 串行执行任务
     results: List[Dict] = []
