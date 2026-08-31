@@ -1,10 +1,17 @@
 import sys
 import asyncio
+import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.endpoints import router as auth_router
+from app.api.endpoints import router
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 # Windows 平台 Playwright 兼容性设置
 if sys.platform == "win32":
@@ -13,7 +20,7 @@ if sys.platform == "win32":
 # 创建 FastAPI 应用实例
 app = FastAPI(
     title="浏览器自动化数据采集平台",
-    description="配置驱动的 RPA 数据采集系统",
+    description="配置驱动的 RPA 数据采集系统（支持登录态管理和任务执行）",
     version="1.0.0",
     debug=settings.DEBUG
 )
@@ -28,7 +35,7 @@ app.add_middleware(
 )
 
 # 注册路由
-app.include_router(auth_router)
+app.include_router(router)
 
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -39,6 +46,7 @@ async def root():
     """根路径"""
     return {
         "message": "浏览器自动化数据采集平台",
+        "version": "1.0.0",
         "docs": "/docs",
         "status": "running"
     }

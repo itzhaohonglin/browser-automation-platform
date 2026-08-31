@@ -1,12 +1,26 @@
-from fastapi import APIRouter, HTTPException, Query
-from app.services.auth_manager import auth_manager
+import logging
+from typing import Dict, List
 from pathlib import Path
+
+from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.database import get_db
 from app.core.config import settings
+from app.models.job import JobQueue, JobStatus
+from app.services.executor import PlaywrightExecutor
+from app.services.auth_manager import auth_manager
 
-router = APIRouter(prefix="/auth", tags=["登录态管理"])
+# 配置日志
+logger = logging.getLogger(__name__)
 
+# 创建路由器
+router = APIRouter()
 
-@router.post("/start")
+# ============ 登录态管理接口 ============
+
+@router.post("/auth/start", tags=["登录态管理"])
 async def start_auth_update(
     profile: str = Query(..., description="登录态标识，如 taobao、jd、test"),
     login_url: str = Query(
@@ -33,7 +47,7 @@ async def start_auth_update(
     return result
 
 
-@router.post("/save")
+@router.post("/auth/save", tags=["登录态管理"])
 async def save_auth_state(
     profile: str = Query(..., description="登录态标识，如 taobao、jd、test")
 ):
@@ -53,7 +67,7 @@ async def save_auth_state(
     return result
 
 
-@router.get("/status")
+@router.get("/auth/status", tags=["登录态管理"])
 async def get_auth_status():
     """
     获取所有登录态的状态
@@ -84,7 +98,7 @@ async def get_auth_status():
     }
 
 
-@router.delete("/session/{profile}")
+@router.delete("/auth/session/{profile}", tags=["登录态管理"])
 async def close_auth_session(profile: str):
     """
     关闭指定 profile 的活跃浏览器会话
@@ -103,7 +117,7 @@ async def close_auth_session(profile: str):
     }
 
 
-@router.delete("/file/{profile}")
+@router.delete("/auth/file/{profile}", tags=["登录态管理"])
 async def delete_auth_file(profile: str):
     """
     删除指定 profile 的登录态文件
@@ -124,3 +138,74 @@ async def delete_auth_file(profile: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
+
+
+# ============ 任务执行接口 ============
+
+@router.post("/task/run", tags=["任务执行"])
+async def run_tasks(
+    config_id: int = Query(..., description="配置 ID"),
+    limit: int = Query(1, description="执行任务数量", ge=1, le=10),
+    db: AsyncSession = Depends(get_db)
+) -> Dict:
+    """
+    手动触发执行指定配置的待处理任务
+
+    用于测试和手动触发任务执行。
+
+    Args:
+        config_id: 配置 ID
+        limit: 执行任务数量（1-10）
+        db: 数据库 session
+
+    Returns:
+        执行结果摘要
+    """
+    logger.info(f"接收任务执行请求：config_id={config_id}, limit={limit}")
+
+    # 1. 查询待处理任务
+    stmt = select(JobQueue).where(
+        JobQueue.config_id == config_id,
+        JobQueue.status == JobStatus.PENDING
+    ).limit(limit)
+
+    result = await db.execute(stmt)
+    jobs = result.scalars().all()
+
+    if not jobs:
+        raise HTTPException(status_code=404, detail="未找到待处理的任务")
+
+    logger.info(f"找到 {len(jobs)} 个待处理任务")
+
+    # 2. 创建执行器
+    executor = PlaywrightExecutor()
+
+    # 3. 串行执行任务
+    results: List[Dict] = []
+    for job in jobs:
+        logger.info(f"开始执行任务 {job.id}")
+        try:
+            result = await executor.execute_job(job.id, db)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"任务 {job.id} 执行异常: {e}", exc_info=True)
+            results.append({
+                "job_id": job.id,
+                "status": "error",
+                "error": str(e)
+            })
+
+    # 4. 统计结果
+    success_count = sum(1 for r in results if r.get("status") == "success")
+    failed_count = len(results) - success_count
+
+    logger.info(f"任务执行完成：成功 {success_count}，失败 {failed_count}")
+
+    return {
+        "status": "completed",
+        "config_id": config_id,
+        "total_jobs": len(results),
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "results": results
+    }
