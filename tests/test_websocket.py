@@ -130,3 +130,50 @@ async def test_websocket_manager_broadcast_handles_disconnected(ws_manager):
     assert ws3 in ws_manager.active_connections
     ws1.send_json.assert_called_once_with(test_message)
     ws3.send_json.assert_called_once_with(test_message)
+
+
+@pytest.mark.asyncio
+async def test_websocket_endpoint_ping_pong():
+    """Test websocket_endpoint ping/pong heartbeat mechanism"""
+    manager = WebSocketManager()
+    mock_ws = MagicMock(spec=WebSocket)
+    mock_ws.accept = AsyncMock()
+    mock_ws.receive_text = AsyncMock(side_effect=["ping", WebSocketDisconnect()])
+    mock_ws.send_text = AsyncMock()
+
+    await manager.websocket_endpoint(mock_ws)
+
+    # Verify connection was accepted
+    mock_ws.accept.assert_called_once()
+    # Verify pong was sent
+    mock_ws.send_text.assert_called_once_with("pong")
+    # Verify connection was cleaned up
+    assert mock_ws not in manager.active_connections
+
+
+@pytest.mark.asyncio
+async def test_websocket_endpoint_handles_disconnect():
+    """Test websocket_endpoint handles client disconnect"""
+    manager = WebSocketManager()
+    mock_ws = MagicMock(spec=WebSocket)
+    mock_ws.accept = AsyncMock()
+    mock_ws.receive_text = AsyncMock(side_effect=WebSocketDisconnect())
+
+    await manager.websocket_endpoint(mock_ws)
+
+    # Verify connection was cleaned up
+    assert mock_ws not in manager.active_connections
+
+
+@pytest.mark.asyncio
+async def test_websocket_endpoint_handles_exception():
+    """Test websocket_endpoint handles exceptions"""
+    manager = WebSocketManager()
+    mock_ws = MagicMock(spec=WebSocket)
+    mock_ws.accept = AsyncMock()
+    mock_ws.receive_text = AsyncMock(side_effect=Exception("Connection error"))
+
+    await manager.websocket_endpoint(mock_ws)
+
+    # Verify connection was cleaned up
+    assert mock_ws not in manager.active_connections

@@ -57,15 +57,17 @@ class WebSocketManager:
             return
 
         disconnected = set()
+        # 创建快照避免迭代时集合被修改
+        connections_snapshot = self.active_connections.copy()
 
-        for connection in self.active_connections:
+        for connection in connections_snapshot:
             try:
                 await connection.send_json(message)
             except WebSocketDisconnect:
-                logger.warning("WebSocket disconnected during broadcast")
+                logger.debug("WebSocket disconnected during broadcast")
                 disconnected.add(connection)
             except Exception as e:
-                logger.error(f"Error sending message to WebSocket: {e}")
+                logger.warning(f"Error sending message to WebSocket, removing connection: {e}")
                 disconnected.add(connection)
 
         # 清理断开的连接
@@ -73,7 +75,7 @@ class WebSocketManager:
             self.active_connections.discard(connection)
 
         if disconnected:
-            logger.info(f"Cleaned up {len(disconnected)} disconnected websockets")
+            logger.info(f"Cleaned up {len(disconnected)} disconnected websockets, current connections: {len(self.active_connections)}")
 
     async def websocket_endpoint(self, websocket: WebSocket):
         """
