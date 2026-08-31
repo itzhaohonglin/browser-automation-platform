@@ -410,11 +410,21 @@ class PlaywrightExecutor:
             job.status = JobStatus.PROCESSING
             await session.commit()
 
+            # 节点 1: 任务开始
+            await self._broadcast_progress(job_id, f"开始执行任务 {job_id}")
+
             # 3. 启动浏览器
             browser, context, playwright = await self._launch_browser(config)
             page = await context.new_page()
 
             self.logger.info(f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）")
+
+            # 节点 2: 浏览器启动完成
+            await self._broadcast_log(
+                "info",
+                f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）",
+                job_id
+            )
 
             # 4. 访问目标 URL
             await page.goto(config.target_url, timeout=TIMEOUTS['page_load'])
@@ -423,10 +433,15 @@ class PlaywrightExecutor:
             # 5. 填充表单
             if config.input_configs:
                 await self._fill_form(page, config.input_configs, job.query_params)
+                # 节点 3: 表单填充完成
+                await self._broadcast_log("info", "表单填充完成", job_id)
 
             # 6. 点击提交按钮
             self.logger.info(f"点击提交按钮: {config.submit_selector}")
             await page.click(config.submit_selector, timeout=TIMEOUTS['click'])
+
+            # 节点 4: 提交按钮点击
+            await self._broadcast_log("info", "点击提交按钮", job_id)
 
             # 7. 等待结果加载
             self.logger.info(f"等待结果加载: {config.wait_selector}")
@@ -438,6 +453,9 @@ class PlaywrightExecutor:
             await asyncio.sleep(1)  # 额外等待确保数据加载完成
 
             self.logger.info("结果页面加载完成")
+
+            # 节点 5: 结果页面加载完成
+            await self._broadcast_log("info", "结果页面加载完成", job_id)
 
             # 8. 数据提取（含翻页）
             if config.pagination_selector and config.max_pages > 1:
@@ -471,6 +489,12 @@ class PlaywrightExecutor:
             execution_time = (datetime.now() - start_time).total_seconds()
             self.logger.info(f"任务 {job_id} 执行成功，耗时 {execution_time:.2f} 秒")
 
+            # 节点 6: 任务成功完成
+            await self._broadcast_progress(
+                job_id,
+                f"任务 {job_id} 执行成功，提取 {len(extracted_data)} 条数据，耗时 {execution_time:.2f} 秒"
+            )
+
             return {
                 "job_id": job_id,
                 "status": "success",
@@ -481,6 +505,9 @@ class PlaywrightExecutor:
 
         except Exception as e:
             self.logger.error(f"任务 {job_id} 执行失败: {e}", exc_info=True)
+
+            # 节点 7: 任务失败
+            await self._broadcast_log("error", f"任务 {job_id} 执行失败: {str(e)}", job_id)
 
             if job:
                 job.status = JobStatus.FAILED
