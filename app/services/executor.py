@@ -489,7 +489,7 @@ class PlaywrightExecutor:
             execution_time = (datetime.now() - start_time).total_seconds()
             self.logger.info(f"任务 {job_id} 执行成功，耗时 {execution_time:.2f} 秒")
 
-            # 节点 6: 任务成功完成
+            # 节点 8: 任务成功完成
             await self._broadcast_progress(
                 job_id,
                 f"任务 {job_id} 执行成功，提取 {len(extracted_data)} 条数据，耗时 {execution_time:.2f} 秒"
@@ -506,7 +506,7 @@ class PlaywrightExecutor:
         except Exception as e:
             self.logger.error(f"任务 {job_id} 执行失败: {e}", exc_info=True)
 
-            # 节点 7: 任务失败
+            # 节点 9: 任务失败
             await self._broadcast_log("error", f"任务 {job_id} 执行失败: {str(e)}", job_id)
 
             if job:
