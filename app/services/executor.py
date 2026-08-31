@@ -38,6 +38,38 @@ class PlaywrightExecutor:
         self.ws_manager = ws_manager
         self.logger = logger
 
+    async def _launch_browser(self, config: CrawlerConfig) -> Tuple[Browser, object]:
+        """
+        启动浏览器（根据登录态配置）
+
+        Args:
+            config: 配置对象
+
+        Returns:
+            (Browser, Context) 实例元组
+        """
+        p = await async_playwright().start()
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--disable-blink-features=AutomationControlled']
+        )
+
+        if config.need_login:
+            auth_file = f"auth_files/auth_{config.auth_profile}.json"
+
+            if not os.path.exists(auth_file):
+                raise FileNotFoundError(
+                    f"登录态文件不存在: {auth_file}，请先通过 /auth/start 接口更新登录态"
+                )
+
+            self.logger.info(f"加载登录态: {auth_file}")
+            context = await browser.new_context(storage_state=auth_file)
+        else:
+            self.logger.info("使用匿名浏览器上下文")
+            context = await browser.new_context()
+
+        return browser, context
+
     async def execute_job(self, job_id: int, session: AsyncSession) -> Dict:
         """
         执行单个任务
@@ -51,6 +83,7 @@ class PlaywrightExecutor:
         """
         start_time = datetime.now()  # Will be used in future tasks for execution timing
         browser = None
+        context = None
         job = None  # Initialize to prevent NameError in exception handler
 
         try:
@@ -75,14 +108,22 @@ class PlaywrightExecutor:
             job.status = JobStatus.PROCESSING
             await session.commit()
 
-            # 占位符，后续任务会实现
-            # TODO: 启动浏览器、执行爬取、保存结果
-            # TODO: Update job status to SUCCESS after successful execution
+            # 3. 启动浏览器
+            browser, context = await self._launch_browser(config)
+            page = await context.new_page()
+
+            self.logger.info(f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）")
+
+            # 4. 访问目标 URL
+            await page.goto(config.target_url, timeout=TIMEOUTS['page_load'])
+            self.logger.info(f"访问目标 URL: {config.target_url}")
+
+            # TODO: 表单填充、数据提取等后续步骤
 
             return {
                 "job_id": job_id,
                 "status": "success",
-                "message": "基础结构已创建"
+                "message": "浏览器启动成功"
             }
 
         except Exception as e:
