@@ -34,17 +34,31 @@ async def lifespan(app: FastAPI):
 
     # Startup
     logger.info("应用启动中...")
-    scheduler = TaskScheduler(ws_manager=websocket_manager)
-    await scheduler.start()
-    logger.info("调度器已启动")
+    try:
+        scheduler = TaskScheduler(ws_manager=websocket_manager)
+        await scheduler.start()
+        logger.info("调度器已启动")
+    except Exception as e:
+        logger.error(f"调度器启动失败: {e}", exc_info=True)
+        # 清理部分初始化的资源
+        if scheduler:
+            try:
+                await scheduler.shutdown()
+            except Exception:
+                pass
+        raise  # 重新抛出异常，阻止应用启动
 
     yield
 
     # Shutdown
     logger.info("应用关闭中...")
     if scheduler:
-        await scheduler.shutdown()
-    logger.info("调度器已停止")
+        try:
+            await scheduler.shutdown()
+            logger.info("调度器已停止")
+        except Exception as e:
+            logger.error(f"调度器停止失败: {e}", exc_info=True)
+            # 继续关闭流程，不重新抛出异常
 
 
 # 创建 FastAPI 应用实例
