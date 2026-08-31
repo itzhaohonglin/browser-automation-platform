@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket 测试客户端</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+        }
+        #messages {
+            border: 1px solid #ccc;
+            height: 400px;
+            overflow-y: scroll;
+            padding: 10px;
+            background: #f5f5f5;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .progress {
+            background: #e3f2fd;
+        }
+        .log-info {
+            background: #f1f8e9;
+        }
+        .log-error {
+            background: #ffebee;
+        }
+        button {
+            margin: 10px 5px;
+            padding: 10px 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket 测试客户端</h1>
+
+    <div>
+        <button id="connectBtn">连接 WebSocket</button>
+        <button id="disconnectBtn" disabled>断开连接</button>
+        <button id="clearBtn">清空消息</button>
+        <span id="status">未连接</span>
+    </div>
+
+    <h2>收到的消息：</h2>
+    <div id="messages"></div>
+
+    <script>
+        let ws = null;
+        const messagesDiv = document.getElementById('messages');
+        const statusSpan = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        connectBtn.onclick = () => {
+            ws = new WebSocket('ws://127.0.0.1:8000/ws');
+
+            ws.onopen = () => {
+                statusSpan.textContent = '已连接';
+                statusSpan.style.color = 'green';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                addMessage('system', '连接成功');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                const type = data.type;
+                const className = type === 'progress' ? 'progress' : `log-${data.level}`;
+
+                let content = `[${data.type}] ${data.message}`;
+                if (data.job_id) {
+                    content += ` (Job ${data.job_id})`;
+                }
+                if (data.progress) {
+                    content += ` - ${data.progress.current}/${data.progress.total}`;
+                }
+
+                addMessage(className, content);
+            };
+
+            ws.onerror = (error) => {
+                addMessage('log-error', `错误: ${error}`);
+            };
+
+            ws.onclose = () => {
+                statusSpan.textContent = '已断开';
+                statusSpan.style.color = 'red';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                addMessage('system', '连接关闭');
+            };
+        };
+
+        disconnectBtn.onclick = () => {
+            if (ws) {
+                ws.close();
+            }
+        };
+
+        clearBtn.onclick = () => {
+            messagesDiv.innerHTML = '';
+        };
+
+        function addMessage(className, content) {
+            const div = document.createElement('div');
+            div.className = `message ${className}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${content}`;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>
