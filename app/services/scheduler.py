@@ -76,35 +76,35 @@ class TaskScheduler:
 
                 self.logger.info(f"发现 {len(failed_jobs)} 个失败任务，开始重置状态")
 
-                # 逐个重置任务状态
+                # 逐个重置任务状态（不提交）
                 reset_count = 0
                 for job in failed_jobs:
-                    try:
-                        job.status = JobStatus.PENDING
-                        job.error_msg = None
-                        await session.commit()
-                        reset_count += 1
+                    job.status = JobStatus.PENDING
+                    job.error_msg = None
+                    reset_count += 1
 
-                        self.logger.info(
-                            f"任务 #{job.id} 已重置为 pending "
-                            f"(重试次数: {job.retry_count}/3)"
-                        )
+                    self.logger.info(
+                        f"任务 #{job.id} 已重置为 pending "
+                        f"(重试次数: {job.retry_count}/3)"
+                    )
 
-                        # 广播日志消息
-                        if self.ws_manager:
+                # 批量提交所有更改
+                try:
+                    await session.commit()
+                    self.logger.info(f"成功重置 {reset_count} 个失败任务")
+
+                    # 广播所有重置消息
+                    if self.ws_manager:
+                        for job in failed_jobs:
                             await self.ws_manager.broadcast({
                                 "type": "log",
                                 "level": "info",
                                 "message": f"任务 #{job.id} 自动重试 (第 {job.retry_count + 1} 次)",
                                 "timestamp": datetime.now().isoformat()
                             })
-
-                    except Exception as e:
-                        self.logger.error(f"重置任务 #{job.id} 失败: {e}")
-                        await session.rollback()
-                        continue
-
-                self.logger.info(f"成功重置 {reset_count} 个失败任务")
+                except Exception as e:
+                    self.logger.error(f"批量重置任务失败: {e}")
+                    await session.rollback()
 
         except Exception as e:
             self.logger.error(f"扫描失败任务时出错: {e}", exc_info=True)
