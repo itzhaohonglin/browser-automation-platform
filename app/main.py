@@ -1,11 +1,12 @@
 import sys
 import asyncio
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.endpoints import router
+from app.api.websocket import websocket_manager
 
 # 配置日志
 logging.basicConfig(
@@ -36,6 +37,11 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(router)
+
+# 注册 WebSocket 路由
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket_manager.websocket_endpoint(websocket)
 
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
