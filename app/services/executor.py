@@ -234,7 +234,8 @@ class PlaywrightExecutor:
         fields_mapping: Dict,
         pagination_selector: str,
         wait_selector: str,
-        max_pages: int
+        max_pages: int,
+        job_id: int = None
     ) -> Tuple[List[Dict], int]:
         """
         翻页提取数据
@@ -245,6 +246,7 @@ class PlaywrightExecutor:
             pagination_selector: 下一页按钮选择器
             wait_selector: 等待加载完成的选择器
             max_pages: 最大翻页数
+            job_id: 任务 ID（可选，用于进度广播）
 
         Returns:
             (所有数据列表, 实际页数)
@@ -259,6 +261,14 @@ class PlaywrightExecutor:
             page_data = await self._extract_page_data(page, fields_mapping)
             all_data.extend(page_data)
             self.logger.info(f"第 {current_page} 页提取 {len(page_data)} 条数据")
+
+            # 节点 6: 每页数据提取完成
+            await self._broadcast_progress(
+                job_id=job_id,
+                message=f"正在处理第 {current_page} 页",
+                current=current_page,
+                total=max_pages
+            )
 
             # 2. 检查是否需要翻页
             if current_page >= max_pages:
@@ -282,6 +292,10 @@ class PlaywrightExecutor:
             # 5. 点击下一页
             self.logger.info("点击下一页按钮")
             await next_button.click(timeout=TIMEOUTS['click'])
+
+            # 节点 7: 翻页动作
+            if job_id:
+                await self._broadcast_log("info", f"点击下一页按钮（第 {current_page + 1} 页）", job_id)
 
             # 6. 等待新页面加载
             await page.wait_for_selector(
@@ -464,7 +478,8 @@ class PlaywrightExecutor:
                     config.fields_mapping,
                     config.pagination_selector,
                     config.wait_selector,
-                    config.max_pages
+                    config.max_pages,
+                    job_id
                 )
             else:
                 extracted_data = await self._extract_page_data(page, config.fields_mapping)
