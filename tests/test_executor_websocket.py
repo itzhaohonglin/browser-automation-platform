@@ -77,3 +77,21 @@ async def test_broadcast_log_without_job_id():
 
     call_args = mock_ws_manager.broadcast.call_args[0][0]
     assert "job_id" not in call_args
+
+
+@pytest.mark.asyncio
+async def test_broadcast_progress_without_progress_params():
+    """测试 _broadcast_progress 不传 current/total 参数"""
+    mock_ws_manager = MagicMock()
+    mock_ws_manager.broadcast = AsyncMock()
+    executor = PlaywrightExecutor(ws_manager=mock_ws_manager)
+
+    await executor._broadcast_progress(123, "测试消息")
+
+    mock_ws_manager.broadcast.assert_called_once()
+    call_args = mock_ws_manager.broadcast.call_args[0][0]
+    assert call_args["type"] == "progress"
+    assert call_args["job_id"] == 123
+    assert call_args["message"] == "测试消息"
+    assert "progress" not in call_args  # 验证没有 progress 字段
+    assert "timestamp" in call_args

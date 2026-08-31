@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Literal
 from datetime import datetime
 
 from playwright.async_api import async_playwright, Browser, Page, TimeoutError as PlaywrightTimeoutError
@@ -61,9 +61,12 @@ class PlaywrightExecutor:
         if current is not None and total is not None:
             payload["progress"] = {"current": current, "total": total}
 
-        await self.ws_manager.broadcast(payload)
+        try:
+            await self.ws_manager.broadcast(payload)
+        except Exception as e:
+            self.logger.error(f"Failed to broadcast progress: {e}")
 
-    async def _broadcast_log(self, level: str, message: str, job_id: int = None):
+    async def _broadcast_log(self, level: Literal["info", "warning", "error"], message: str, job_id: int = None):
         """
         推送日志消息
 
@@ -85,7 +88,10 @@ class PlaywrightExecutor:
         if job_id is not None:
             payload["job_id"] = job_id
 
-        await self.ws_manager.broadcast(payload)
+        try:
+            await self.ws_manager.broadcast(payload)
+        except Exception as e:
+            self.logger.error(f"Failed to broadcast log: {e}")
 
     async def _fill_form(
         self,
