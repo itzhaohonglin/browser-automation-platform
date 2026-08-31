@@ -99,7 +99,7 @@ class TaskScheduler:
                             await self.ws_manager.broadcast({
                                 "type": "log",
                                 "level": "info",
-                                "message": f"任务 #{job.id} 自动重试 (第 {job.retry_count + 1} 次)",
+                                "message": f"任务 #{job.id} 已重置为 pending 状态进行重试",
                                 "timestamp": datetime.now().isoformat()
                             })
                 except Exception as e:
