@@ -3,62 +3,94 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>浏览器自动化数据采集平台</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-        }
-        .header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
-        }
-        .status-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .status-card h2 {
-            margin-top: 0;
-            color: #333;
-        }
-        .badge {
-            display: inline-block;
-            padding: 5px 12px;
-            border-radius: 20px;
-            background: #4caf50;
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
-        }
-    </style>
+    <title>浏览器自动化数据采集平台 - 监控看板</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="header">
-        <h1>🚀 浏览器自动化数据采集平台</h1>
-        <p>配置驱动的 RPA 数据采集系统</p>
+    <!-- 头部 -->
+    <header class="header">
+        <div class="header-content">
+            <h1>🚀 浏览器自动化数据采集平台</h1>
+            <div class="connection-status">
+                <span id="ws-status" class="status-badge disconnected">连接中...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主容器 -->
+    <div class="container">
+        <!-- 统计卡片区域 -->
+        <section class="stats-section">
+            <div class="stat-card stat-total">
+                <div class="stat-icon">📊</div>
+                <div class="stat-content">
+                    <div class="stat-label">总任务数</div>
+                    <div class="stat-value" id="stat-total">0</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-success">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                    <div class="stat-label">成功</div>
+                    <div class="stat-value" id="stat-success">0</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-failed">
+                <div class="stat-icon">❌</div>
+                <div class="stat-content">
+                    <div class="stat-label">失败</div>
+                    <div class="stat-value" id="stat-failed">0</div>
+                </div>
+            </div>
+
+            <div class="stat-card stat-rate">
+                <div class="stat-icon">📈</div>
+                <div class="stat-content">
+                    <div class="stat-label">成功率</div>
+                    <div class="stat-value" id="stat-rate">0%</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 进度和登录态区域 -->
+        <section class="info-section">
+            <!-- 当前任务进度 -->
+            <div class="panel progress-panel">
+                <h2>当前任务进度</h2>
+                <div id="progress-content">
+                    <div class="idle-state">
+                        <span class="idle-icon">💤</span>
+                        <p>空闲中</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 登录态状态 -->
+            <div class="panel auth-panel">
+                <h2>登录态状态</h2>
+                <div id="auth-list">
+                    <p class="empty-state">暂无登录态配置</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 实时日志区域 -->
+        <section class="log-section">
+            <div class="panel">
+                <h2>实时日志</h2>
+                <div id="log-container" class="log-container">
+                    <div class="log-entry log-info">
+                        <span class="log-time">[--:--:--]</span>
+                        <span class="log-level">[INFO]</span>
+                        <span class="log-message">等待 WebSocket 连接...</span>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
-    <div class="status-card">
-        <h2>系统状态</h2>
-        <p>✅ 静态文件服务: <span class="badge">运行中</span></p>
-        <p>📚 API 文档: <a href="/docs" target="_blank">访问 Swagger UI</a></p>
-        <p>🔧 开发中: 监控看板界面即将上线</p>
-    </div>
+    <script src="/static/app.js"></script>
 </body>
 </html>
