@@ -49,8 +49,9 @@ class PlaywrightExecutor:
         Returns:
             执行结果字典
         """
-        start_time = datetime.now()
+        start_time = datetime.now()  # Will be used in future tasks for execution timing
         browser = None
+        job = None  # Initialize to prevent NameError in exception handler
 
         try:
             # 1. 查询任务和配置
@@ -76,6 +77,7 @@ class PlaywrightExecutor:
 
             # 占位符，后续任务会实现
             # TODO: 启动浏览器、执行爬取、保存结果
+            # TODO: Update job status to SUCCESS after successful execution
 
             return {
                 "job_id": job_id,
