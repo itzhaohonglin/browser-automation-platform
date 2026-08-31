@@ -95,3 +95,25 @@ async def test_broadcast_progress_without_progress_params():
     assert call_args["message"] == "测试消息"
     assert "progress" not in call_args  # 验证没有 progress 字段
     assert "timestamp" in call_args
+
+
+@pytest.mark.asyncio
+async def test_broadcast_progress_handles_exception():
+    """测试 _broadcast_progress 在广播失败时正确处理异常"""
+    mock_ws_manager = MagicMock()
+    mock_ws_manager.broadcast = AsyncMock(side_effect=Exception("Connection lost"))
+    executor = PlaywrightExecutor(ws_manager=mock_ws_manager)
+
+    # 不应该抛出异常
+    await executor._broadcast_progress(123, "测试消息")
+
+
+@pytest.mark.asyncio
+async def test_broadcast_log_handles_exception():
+    """测试 _broadcast_log 在广播失败时正确处理异常"""
+    mock_ws_manager = MagicMock()
+    mock_ws_manager.broadcast = AsyncMock(side_effect=Exception("Connection lost"))
+    executor = PlaywrightExecutor(ws_manager=mock_ws_manager)
+
+    # 不应该抛出异常
+    await executor._broadcast_log("error", "测试日志", job_id=456)
