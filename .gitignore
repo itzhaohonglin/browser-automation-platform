@@ -47,6 +47,10 @@ env/
 # Logs
 *.log
 
+# Authentication state files (sensitive data)
+auth_files/*.json
+!auth_files/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db

@@ -38,7 +38,7 @@ class PlaywrightExecutor:
         self.ws_manager = ws_manager
         self.logger = logger
 
-    async def _launch_browser(self, config: CrawlerConfig) -> Tuple[Browser, object]:
+    async def _launch_browser(self, config: CrawlerConfig) -> Tuple[Browser, object, object]:
         """
         启动浏览器（根据登录态配置）
 
@@ -46,29 +46,38 @@ class PlaywrightExecutor:
             config: 配置对象
 
         Returns:
-            (Browser, Context) 实例元组
+            (Browser, Context, Playwright) 实例元组，用于后续清理
         """
-        p = await async_playwright().start()
-        browser = await p.chromium.launch(
-            headless=True,
-            args=['--disable-blink-features=AutomationControlled']
-        )
-
+        # Validate auth_profile when need_login=True
         if config.need_login:
-            auth_file = f"auth_files/auth_{config.auth_profile}.json"
+            if not config.auth_profile:
+                raise ValueError("auth_profile 必须在 need_login=True 时提供")
 
-            if not os.path.exists(auth_file):
-                raise FileNotFoundError(
-                    f"登录态文件不存在: {auth_file}，请先通过 /auth/start 接口更新登录态"
-                )
+        p = await async_playwright().start()
+        try:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--disable-blink-features=AutomationControlled']
+            )
 
-            self.logger.info(f"加载登录态: {auth_file}")
-            context = await browser.new_context(storage_state=auth_file)
-        else:
-            self.logger.info("使用匿名浏览器上下文")
-            context = await browser.new_context()
+            if config.need_login:
+                auth_file = f"auth_files/auth_{config.auth_profile}.json"
 
-        return browser, context
+                if not os.path.exists(auth_file):
+                    raise FileNotFoundError(
+                        f"登录态文件不存在: {auth_file}，请先通过 /auth/start 接口更新登录态"
+                    )
+
+                self.logger.info(f"加载登录态: {auth_file}")
+                context = await browser.new_context(storage_state=auth_file)
+            else:
+                self.logger.info("使用匿名浏览器上下文")
+                context = await browser.new_context()
+
+            return browser, context, p
+        except Exception:
+            await p.stop()
+            raise
 
     async def execute_job(self, job_id: int, session: AsyncSession) -> Dict:
         """
@@ -84,6 +93,8 @@ class PlaywrightExecutor:
         start_time = datetime.now()  # Will be used in future tasks for execution timing
         browser = None
         context = None
+        playwright = None
+        page = None
         job = None  # Initialize to prevent NameError in exception handler
 
         try:
@@ -109,7 +120,7 @@ class PlaywrightExecutor:
             await session.commit()
 
             # 3. 启动浏览器
-            browser, context = await self._launch_browser(config)
+            browser, context, playwright = await self._launch_browser(config)
             page = await context.new_page()
 
             self.logger.info(f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）")
@@ -142,5 +153,12 @@ class PlaywrightExecutor:
             }
 
         finally:
+            # Cleanup in reverse order of creation to prevent resource leaks
+            if page:
+                await page.close()
+            if context:
+                await context.close()
             if browser:
                 await browser.close()
+            if playwright:
+                await playwright.stop()
