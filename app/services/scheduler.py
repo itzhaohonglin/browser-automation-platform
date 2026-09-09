@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 class TaskScheduler:
     """任务调度器 - 负责定时补跑失败任务"""
 
+    # 调度配置常量
+    RETRY_INTERVAL_MINUTES = 30  # 重试间隔（分钟）
+    FIRST_RUN_DELAY_MINUTES = 1  # 首次运行延迟（分钟）
+    MAX_RETRY_COUNT = 3  # 最大重试次数
+    BATCH_SIZE = 100  # 每批处理的任务数量
+
     def __init__(self, ws_manager=None):
         """
         初始化调度器
@@ -39,10 +45,10 @@ class TaskScheduler:
         # 添加定时任务：每 30 分钟扫描并重试失败任务
         self.scheduler.add_job(
             func=self.retry_failed_jobs,
-            trigger=IntervalTrigger(minutes=30),
+            trigger=IntervalTrigger(minutes=self.RETRY_INTERVAL_MINUTES),
             id='retry_failed_jobs',
             name='重试失败任务',
-            next_run_time=datetime.now() + timedelta(minutes=1)  # 首次执行延迟 1 分钟
+            next_run_time=datetime.now() + timedelta(minutes=self.FIRST_RUN_DELAY_MINUTES)  # 首次执行延迟
         )
 
         self.scheduler.start()
@@ -53,19 +59,20 @@ class TaskScheduler:
         扫描并重试失败的任务
 
         逻辑：
-        1. 查询 status='failed' 且 retry_count < 3 的任务
+        1. 查询 status='failed' 且 retry_count < MAX_RETRY_COUNT 的任务
         2. 将状态重置为 'pending'，清空 error_msg
         3. 保留 retry_count（由执行器在失败时递增）
         """
         self.logger.info("开始扫描失败任务...")
 
         try:
-            async for session in get_session():
+            # 获取数据库会话
+            async with get_session() as session:
                 # 查询失败任务
                 stmt = select(JobQueue).where(
                     JobQueue.status == JobStatus.FAILED,
-                    JobQueue.retry_count < 3
-                ).order_by(JobQueue.updated_at.asc()).limit(100)
+                    JobQueue.retry_count < self.MAX_RETRY_COUNT
+                ).order_by(JobQueue.updated_at.asc()).limit(self.BATCH_SIZE)
 
                 result = await session.execute(stmt)
                 failed_jobs = result.scalars().all()
@@ -76,22 +83,20 @@ class TaskScheduler:
 
                 self.logger.info(f"发现 {len(failed_jobs)} 个失败任务，开始重置状态")
 
-                # 逐个重置任务状态（不提交）
-                reset_count = 0
+                # 逐个重置任务状态（内存中）
                 for job in failed_jobs:
                     job.status = JobStatus.PENDING
                     job.error_msg = None
-                    reset_count += 1
 
                     self.logger.info(
                         f"任务 #{job.id} 已重置为 pending "
-                        f"(重试次数: {job.retry_count}/3)"
+                        f"(重试次数: {job.retry_count}/{self.MAX_RETRY_COUNT})"
                     )
 
                 # 批量提交所有更改
                 try:
                     await session.commit()
-                    self.logger.info(f"成功重置 {reset_count} 个失败任务")
+                    self.logger.info(f"成功重置 {len(failed_jobs)} 个失败任务")
 
                     # 广播所有重置消息
                     if self.ws_manager:
@@ -99,8 +104,7 @@ class TaskScheduler:
                             await self.ws_manager.broadcast({
                                 "type": "log",
                                 "level": "info",
-                                "message": f"任务 #{job.id} 已重置为 pending 状态进行重试",
-                                "timestamp": datetime.now().isoformat()
+                                "msg": f"任务 #{job.id} 已重置为 pending 状态进行重试"
                             })
                 except Exception as e:
                     self.logger.error(f"批量重置任务失败: {e}")

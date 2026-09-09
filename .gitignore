@@ -19,18 +19,27 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual Environment
 venv/
-ENV/
 env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
 
 # IDE
 .vscode/
 .idea/
+*.iml
+*.iws
+.idea_modules/
 *.swp
 *.swo
 *~
@@ -38,6 +47,7 @@ env/
 # Environment variables
 .env
 .env.local
+.env.*.local
 
 # Database
 *.db
@@ -46,11 +56,79 @@ env/
 
 # Logs
 *.log
+logs/
+*.log.*
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
 
 # Authentication state files (sensitive data)
 auth_files/*.json
 !auth_files/.gitkeep
 
-# OS
-.DS_Store
-Thumbs.db
+# Claude Code 配置（个人化部分）
+.claude/settings.local.json
+.claude/memory/
+.claude/plans/
+.claude/worktrees/
+# 保留 .claude/settings.json 用于团队共享配置
+
+# 临时文档和报告
+*_REPORT.md
+*_SUMMARY.md
+*_ACCEPTANCE.md
+BUILD_*.md
+TASK_*.md
+
+# 测试相关临时文件
+test_websocket_client.html
+test_websocket_integration.py
+
+# Playwright
+.playwright/
+playwright-report/
+
+# Backup files
+*.bak
+
+# Compiled translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+docs/.doctrees/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/

@@ -47,6 +47,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+def get_session():
+    """
+    提供数据库 session 的异步上下文管理器（用于非 FastAPI 场景）
+
+    使用方式:
+        async with get_session() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+    """
+    return AsyncSessionLocal()
+
+
 async def init_db():
     """
     创建所有表（仅用于开发测试）

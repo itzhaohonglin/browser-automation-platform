@@ -1,0 +1,14 @@
+# requirements.txt - 开发依赖
+# 代码格式化和检查
+black==24.4.2
+isort==5.13.2
+flake8==7.0.0
+pre-commit==3.7.0
+
+# 测试工具
+pytest==8.2.0
+pytest-asyncio==0.23.6
+pytest-cov==5.0.0
+
+# 安全检查
+bandit==1.7.8

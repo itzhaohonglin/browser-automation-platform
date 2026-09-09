@@ -38,42 +38,34 @@ class PlaywrightExecutor:
         self.ws_manager = ws_manager
         self.logger = logger
 
-    async def _broadcast_progress(self, job_id: int, message: str, current: int = None, total: int = None):
+    async def _broadcast_progress(self, job_id: int, data: Dict):
         """
-        推送进度消息
+        推送进度消息（遵循 PRD V2.0 格式）
 
         Args:
             job_id: 任务 ID
-            message: 进度描述
-            current: 当前进度（可选）
-            total: 总进度（可选）
+            data: 进度数据字典
         """
         if not self.ws_manager:
             return
 
         payload = {
             "type": "progress",
-            "job_id": job_id,
-            "message": message,
-            "timestamp": datetime.now().isoformat()
+            "data": data
         }
-
-        if current is not None and total is not None:
-            payload["progress"] = {"current": current, "total": total}
 
         try:
             await self.ws_manager.broadcast(payload)
         except Exception as e:
             self.logger.error(f"Failed to broadcast progress: {e}")
 
-    async def _broadcast_log(self, level: Literal["info", "warning", "error"], message: str, job_id: int = None):
+    async def _broadcast_log(self, level: Literal["info", "success", "error", "warning"], msg: str):
         """
-        推送日志消息
+        推送日志消息（遵循 PRD V2.0 格式）
 
         Args:
-            level: 日志级别（info/warning/error）
-            message: 日志内容
-            job_id: 任务 ID（可选）
+            level: 日志级别（info/success/error/warning）
+            msg: 日志内容
         """
         if not self.ws_manager:
             return
@@ -81,12 +73,8 @@ class PlaywrightExecutor:
         payload = {
             "type": "log",
             "level": level,
-            "message": message,
-            "timestamp": datetime.now().isoformat()
+            "msg": msg
         }
-
-        if job_id is not None:
-            payload["job_id"] = job_id
 
         try:
             await self.ws_manager.broadcast(payload)
@@ -141,7 +129,7 @@ class PlaywrightExecutor:
 
     async def _extract_page_data(self, page: Page, fields_mapping: Dict) -> List[Dict]:
         """
-        提取当前页面的数据
+        提取当前页面的数据（在浏览器端一次性完成，性能优化）
 
         Args:
             page: 页面对象
@@ -152,81 +140,78 @@ class PlaywrightExecutor:
         """
         self.logger.info("开始提取当前页数据")
 
-        # 首先尝试检测是否是列表结构
-        # 简化实现：假设 fields_mapping 的第一个选择器可以定位多个元素（列表项）
+        # 解析第一个字段的选择器作为容器选择器
         first_field = list(fields_mapping.keys())[0]
         first_rule = fields_mapping[first_field]
-
-        # 解析选择器（去掉 text 或 @属性 部分）
         parts = first_rule.split()
-        first_selector = parts[0]
+        container_selector = parts[0]
 
-        # 检查是否有多个匹配元素
-        elements = page.locator(first_selector)
-        count = await elements.count()
+        self.logger.info(f"使用容器选择器: {container_selector}")
 
-        self.logger.info(f"检测到 {count} 个数据项")
+        # 在浏览器端一次性提取所有数据
+        page_data = await page.evaluate("""
+            (config) => {
+                const { containerSelector, fieldsMapping } = config;
+                const result = [];
 
-        if count == 0:
+                // 查找所有容器元素
+                const containers = document.querySelectorAll(containerSelector);
+
+                containers.forEach(container => {
+                    const row = {};
+
+                    for (const [fieldName, selectorRule] of Object.entries(fieldsMapping)) {
+                        let value = '';
+
+                        try {
+                            // 解析选择器规则（格式：".selector text" 或 ".selector @attr"）
+                            const parts = selectorRule.trim().split(/\\s+/);
+                            const selector = parts[0];
+                            const extractType = parts.length > 1 ? parts[1] : 'text';
+
+                            // 在容器内查找元素
+                            const element = container.querySelector(selector);
+
+                            if (element) {
+                                if (extractType === 'text') {
+                                    // 提取文本内容
+                                    value = element.innerText || element.textContent || '';
+                                } else if (extractType.startsWith('@')) {
+                                    // 提取属性（如 @href, @src）
+                                    const attrName = extractType.substring(1);
+                                    value = element.getAttribute(attrName) || '';
+                                } else {
+                                    // 默认提取文本
+                                    value = element.innerText || element.textContent || '';
+                                }
+
+                                // 去除首尾空白
+                                value = value.trim();
+                            }
+                        } catch (error) {
+                            // 忽略错误，返回空字符串
+                            console.warn(`提取字段 ${fieldName} 失败:`, error);
+                        }
+
+                        row[fieldName] = value;
+                    }
+
+                    result.push(row);
+                });
+
+                return result;
+            }
+        """, {
+            "containerSelector": container_selector,
+            "fieldsMapping": fields_mapping
+        })
+
+        self.logger.info(f"提取到 {len(page_data)} 条数据")
+
+        if len(page_data) == 0:
             self.logger.warning("未找到任何数据项")
-            return []
 
-        # 如果是列表结构（多个元素），逐项提取
-        if count > 1:
-            result = []
-            for i in range(count):
-                item_data = {}
-                for field_name, selector_rule in fields_mapping.items():
-                    try:
-                        value = await self._extract_field(page, selector_rule, index=i)
-                        item_data[field_name] = value
-                    except Exception as e:
-                        self.logger.warning(f"字段 {field_name} 提取失败（第 {i+1} 项）: {e}")
-                        item_data[field_name] = None
-
-                result.append(item_data)
-
-            return result
-        else:
-            # 单条数据
-            item_data = {}
-            for field_name, selector_rule in fields_mapping.items():
-                try:
-                    value = await self._extract_field(page, selector_rule, index=0)
-                    item_data[field_name] = value
-                except Exception as e:
-                    self.logger.warning(f"字段 {field_name} 提取失败: {e}")
-                    item_data[field_name] = None
-
-            return [item_data]
-
-    async def _extract_field(self, page: Page, selector_rule: str, index: int = 0) -> Optional[str]:
-        """
-        提取单个字段的值
-
-        Args:
-            page: 页面对象
-            selector_rule: 选择器规则（如 ".title text" 或 ".link @href"）
-            index: 元素索引（用于列表）
-
-        Returns:
-            提取的值
-        """
-        parts = selector_rule.split()
-        selector = parts[0]
-
-        # 获取指定索引的元素
-        element = page.locator(selector).nth(index)
-
-        # 检查是否提取属性
-        if len(parts) > 1 and parts[1].startswith('@'):
-            attr_name = parts[1][1:]  # 去掉 @ 符号
-            value = await element.get_attribute(attr_name)
-        else:
-            # 提取文本（默认行为）
-            value = await element.inner_text()
-
-        return value.strip() if value else None
+        return page_data
 
     async def _extract_with_pagination(
         self,
@@ -265,9 +250,11 @@ class PlaywrightExecutor:
             # 节点 6: 每页数据提取完成
             await self._broadcast_progress(
                 job_id=job_id,
-                message=f"正在处理第 {current_page} 页",
-                current=current_page,
-                total=max_pages
+                data={
+                    "current_page": current_page,
+                    "total_pages": max_pages,
+                    "status": "processing"
+                }
             )
 
             # 2. 检查是否需要翻页
@@ -295,7 +282,7 @@ class PlaywrightExecutor:
 
             # 节点 7: 翻页动作
             if job_id:
-                await self._broadcast_log("info", f"点击下一页按钮（第 {current_page + 1} 页）", job_id)
+                await self._broadcast_log("info", f"点击下一页按钮（第 {current_page + 1} 页）")
 
             # 6. 等待新页面加载
             await page.wait_for_selector(
@@ -425,7 +412,15 @@ class PlaywrightExecutor:
             await session.commit()
 
             # 节点 1: 任务开始
-            await self._broadcast_progress(job_id, f"开始执行任务 {job_id}")
+            await self._broadcast_progress(
+                job_id=job_id,
+                data={
+                    "job_id": job_id,
+                    "status": "running",
+                    "current_page": 0,
+                    "total_pages": config.max_pages
+                }
+            )
 
             # 3. 启动浏览器
             browser, context, playwright = await self._launch_browser(config)
@@ -436,8 +431,7 @@ class PlaywrightExecutor:
             # 节点 2: 浏览器启动完成
             await self._broadcast_log(
                 "info",
-                f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）",
-                job_id
+                f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）"
             )
 
             # 4. 访问目标 URL
@@ -448,14 +442,14 @@ class PlaywrightExecutor:
             if config.input_configs:
                 await self._fill_form(page, config.input_configs, job.query_params)
                 # 节点 3: 表单填充完成
-                await self._broadcast_log("info", "表单填充完成", job_id)
+                await self._broadcast_log("info", "表单填充完成")
 
             # 6. 点击提交按钮
             self.logger.info(f"点击提交按钮: {config.submit_selector}")
             await page.click(config.submit_selector, timeout=TIMEOUTS['click'])
 
             # 节点 4: 提交按钮点击
-            await self._broadcast_log("info", "点击提交按钮", job_id)
+            await self._broadcast_log("info", "点击提交按钮")
 
             # 7. 等待结果加载
             self.logger.info(f"等待结果加载: {config.wait_selector}")
@@ -469,7 +463,7 @@ class PlaywrightExecutor:
             self.logger.info("结果页面加载完成")
 
             # 节点 5: 结果页面加载完成
-            await self._broadcast_log("info", "结果页面加载完成", job_id)
+            await self._broadcast_log("info", "结果页面加载完成")
 
             # 8. 数据提取（含翻页）
             if config.pagination_selector and config.max_pages > 1:
@@ -506,7 +500,17 @@ class PlaywrightExecutor:
 
             # 节点 8: 任务成功完成
             await self._broadcast_progress(
-                job_id,
+                job_id=job_id,
+                data={
+                    "job_id": job_id,
+                    "status": "completed",
+                    "extracted_count": len(extracted_data),
+                    "pages_crawled": page_count,
+                    "execution_time": execution_time
+                }
+            )
+            await self._broadcast_log(
+                "success",
                 f"任务 {job_id} 执行成功，提取 {len(extracted_data)} 条数据，耗时 {execution_time:.2f} 秒"
             )
 
@@ -522,7 +526,15 @@ class PlaywrightExecutor:
             self.logger.error(f"任务 {job_id} 执行失败: {e}", exc_info=True)
 
             # 节点 9: 任务失败
-            await self._broadcast_log("error", f"任务 {job_id} 执行失败: {str(e)}", job_id)
+            await self._broadcast_log("error", f"任务 {job_id} 执行失败: {str(e)}")
+            await self._broadcast_progress(
+                job_id=job_id,
+                data={
+                    "job_id": job_id,
+                    "status": "failed",
+                    "error": str(e)
+                }
+            )
 
             if job:
                 job.status = JobStatus.FAILED
