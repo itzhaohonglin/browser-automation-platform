@@ -1,6 +1,6 @@
 # app/schemas/config.py
 from typing import Optional, Dict
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class ConfigBase(BaseModel):
@@ -18,3 +18,14 @@ class ConfigBase(BaseModel):
     pagination_selector: Optional[str] = Field(None, max_length=200, description="下一页按钮选择器")
     max_pages: int = Field(default=1, ge=1, description="最大翻页数")
     is_active: bool = Field(default=True, description="是否启用")
+
+
+class ConfigCreate(ConfigBase):
+    """创建配置的请求 Schema"""
+
+    @model_validator(mode='after')
+    def validate_auth_profile(self) -> 'ConfigCreate':
+        """验证：need_login=True 时 auth_profile 必填"""
+        if self.need_login and not self.auth_profile:
+            raise ValueError('need_login=True 时必须提供 auth_profile')
+        return self
