@@ -1,7 +1,6 @@
 # app/schemas/config.py
 from typing import Optional, Dict
-from datetime import datetime
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class ConfigBase(BaseModel):
