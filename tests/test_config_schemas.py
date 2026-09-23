@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from app.schemas.config import ConfigBase, ConfigCreate
+from app.schemas.config import ConfigBase, ConfigCreate, ConfigUpdate
 
 
 def test_config_base_required_fields():
@@ -86,3 +86,35 @@ def test_config_create_url_validation():
 
     errors = exc_info.value.errors()
     assert any('url' in str(err).lower() for err in errors)
+
+
+def test_config_update_partial_fields():
+    """测试部分更新（所有字段可选）"""
+    update = ConfigUpdate(max_pages=10, is_active=False)
+
+    assert update.max_pages == 10
+    assert update.is_active is False
+    assert update.config_name is None
+    assert update.target_url is None
+
+
+def test_config_update_need_login_validation():
+    """测试更新时 need_login=True 必须提供 auth_profile"""
+    with pytest.raises(ValidationError) as exc_info:
+        ConfigUpdate(
+            need_login=True
+            # 缺少 auth_profile
+        )
+
+    assert "need_login=True 时必须提供 auth_profile" in str(exc_info.value)
+
+
+def test_config_update_with_auth_profile():
+    """测试更新 need_login 和 auth_profile"""
+    update = ConfigUpdate(
+        need_login=True,
+        auth_profile="new_profile"
+    )
+
+    assert update.need_login is True
+    assert update.auth_profile == "new_profile"
