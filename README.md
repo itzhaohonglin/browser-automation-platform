@@ -249,7 +249,70 @@ python -m app.main
 
 ## 💡 核心功能
 
-### 1. 登录态管理
+### 1. 配置管理 API
+
+通过 RESTful API 管理采集配置（CRUD 操作）：
+
+#### 创建配置
+```bash
+# POST /api/configs
+curl -X POST "http://127.0.0.1:8000/api/configs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config_name": "百度搜索测试",
+    "target_url": "https://www.baidu.com",
+    "input_configs": {
+      "inputs": [
+        {
+          "selector": "#kw",
+          "param_key": "keyword",
+          "input_type": "text"
+        }
+      ]
+    },
+    "submit_selector": "#su",
+    "wait_selector": "#content_left",
+    "fields_mapping": {
+      "list_selector": ".c-container",
+      "fields": [
+        {"name": "title", "selector": "h3 a", "attr": "text"},
+        {"name": "url", "selector": "h3 a", "attr": "href"}
+      ]
+    },
+    "max_pages": 3
+  }'
+```
+
+#### 获取配置列表
+```bash
+# GET /api/configs - 支持分页和过滤
+curl "http://127.0.0.1:8000/api/configs?page=1&page_size=20&is_active=true"
+```
+
+#### 获取配置详情
+```bash
+# GET /api/configs/{config_id}
+curl "http://127.0.0.1:8000/api/configs/1"
+```
+
+#### 更新配置
+```bash
+# PUT /api/configs/{config_id} - 支持部分更新
+curl -X PUT "http://127.0.0.1:8000/api/configs/1" \
+  -H "Content-Type: application/json" \
+  -d '{"max_pages": 10, "is_active": false}'
+```
+
+#### 删除配置
+```bash
+# DELETE /api/configs/{config_id}
+# 注意：如果存在待执行任务，将返回 409 Conflict
+curl -X DELETE "http://127.0.0.1:8000/api/configs/1"
+```
+
+**API 文档**: 访问 http://127.0.0.1:8000/docs 查看完整的 Swagger UI 文档
+
+### 2. 登录态管理
 
 支持多站点登录态隔离和持久化：
 
@@ -269,7 +332,7 @@ curl -X DELETE "http://127.0.0.1:8000/auth/clear?profile=taobao"
 
 详细说明: [docs/03_auth_usage.md](docs/03_auth_usage.md)
 
-### 2. 任务执行
+### 3. 任务执行
 
 配置驱动的自动化执行：
 
@@ -296,7 +359,7 @@ curl -X DELETE "http://127.0.0.1:8000/auth/clear?profile=taobao"
 
 详细说明: [docs/executor_usage.md](docs/executor_usage.md)
 
-### 3. 定时调度
+### 4. 定时调度
 
 自动补跑失败任务：
 
@@ -306,7 +369,7 @@ curl -X DELETE "http://127.0.0.1:8000/auth/clear?profile=taobao"
 
 详细说明: [docs/scheduler_usage.md](docs/scheduler_usage.md)
 
-### 4. 实时监控
+### 5. 实时监控
 
 WebSocket 实时推送：
 
