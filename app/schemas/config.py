@@ -1,6 +1,7 @@
 # app/schemas/config.py
-from typing import Optional, Dict
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from typing import Optional, Dict, List
+from datetime import datetime
+from pydantic import BaseModel, Field, HttpUrl, model_validator, ConfigDict
 
 
 class ConfigBase(BaseModel):
@@ -53,3 +54,21 @@ class ConfigUpdate(BaseModel):
         if self.need_login is True and not self.auth_profile:
             raise ValueError('need_login=True 时必须提供 auth_profile')
         return self
+
+
+class ConfigResponse(ConfigBase):
+    """配置响应 Schema"""
+
+    id: int = Field(..., description="配置 ID")
+    created_at: datetime = Field(..., description="创建时间")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConfigListResponse(BaseModel):
+    """配置列表响应 Schema"""
+
+    total: int = Field(..., description="总记录数")
+    page: int = Field(..., description="当前页码")
+    page_size: int = Field(..., description="每页大小")
+    items: List[ConfigResponse] = Field(..., description="配置列表")
