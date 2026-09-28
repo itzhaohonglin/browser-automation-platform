@@ -299,7 +299,8 @@ class PlaywrightExecutor:
         self,
         page: Union[Page, Frame],
         input_configs: List[Dict],
-        query_params: Dict
+        query_params: Dict,
+        timeouts: Dict = None
     ):
         """
         填充表单
@@ -308,7 +309,11 @@ class PlaywrightExecutor:
             page: 页面对象或 Frame 对象
             input_configs: 输入配置列表
             query_params: 查询参数（用于占位符替换）
+            timeouts: 超时配置（可选）
         """
+        if timeouts is None:
+            timeouts = TIMEOUTS
+
         self.logger.info(f"开始填充表单，参数: {query_params}")
 
         for input_cfg in input_configs:
@@ -331,14 +336,14 @@ class PlaywrightExecutor:
 
             try:
                 if input_type == 'text' or input_type == 'fill':
-                    await page.fill(selector, value, timeout=TIMEOUTS['click'])
+                    await page.fill(selector, value, timeout=timeouts['click'])
                 elif input_type == 'select':
-                    await page.select_option(selector, value, timeout=TIMEOUTS['click'])
+                    await page.select_option(selector, value, timeout=timeouts['click'])
                 elif input_type == 'check':
-                    await page.check(selector, timeout=TIMEOUTS['click'])
+                    await page.check(selector, timeout=timeouts['click'])
                 else:
                     self.logger.warning(f"未知的输入类型: {input_type}，使用 fill")
-                    await page.fill(selector, value, timeout=TIMEOUTS['click'])
+                    await page.fill(selector, value, timeout=timeouts['click'])
             except PlaywrightTimeoutError:
                 raise TimeoutError(f"元素 {selector} 等待超时")
             except Exception as e:
@@ -766,6 +771,10 @@ class PlaywrightExecutor:
             if not config:
                 raise ValueError(f"配置不存在: {job.config_id}")
 
+            # 加载动态配置
+            timeouts = self._load_timeouts(config)
+            extraction_cfg = self._load_extraction_config(config)
+
             self.logger.info(f"开始执行任务 {job_id}，配置: {config.config_name}")
 
             # 2. 更新状态为 processing
@@ -802,7 +811,7 @@ class PlaywrightExecutor:
             )
 
             # 4. 访问目标 URL
-            await page.goto(config.target_url, timeout=TIMEOUTS['page_load'], wait_until='networkidle')
+            await page.goto(config.target_url, timeout=timeouts['page_load'], wait_until='networkidle')
             self.logger.info(f"访问目标 URL: {config.target_url}")
 
             # 等待页面完全加载（iframe 内容可能需要额外时间渲染）
@@ -827,7 +836,7 @@ class PlaywrightExecutor:
                     iframe1_selector = config.fields_mapping.get('iframe1_selector')
                     if iframe1_selector:
                         self.logger.info(f"等待第1层iframe: {iframe1_selector}")
-                        iframe1_element = await page.wait_for_selector(iframe1_selector, timeout=10000)
+                        iframe1_element = await page.wait_for_selector(iframe1_selector, timeout=timeouts['wait_selector'])
                         iframe1 = await iframe1_element.content_frame()
 
                         if not iframe1:
@@ -844,7 +853,7 @@ class PlaywrightExecutor:
                         iframe2_selector = config.fields_mapping.get('iframe2_selector')
                         if iframe2_selector:
                             self.logger.info(f"等待第2层iframe: {iframe2_selector}")
-                            iframe2_element = await iframe1.wait_for_selector(iframe2_selector, timeout=10000)
+                            iframe2_element = await iframe1.wait_for_selector(iframe2_selector, timeout=timeouts['wait_selector'])
                             iframe2 = await iframe2_element.content_frame()
 
                             if not iframe2:
@@ -915,13 +924,13 @@ class PlaywrightExecutor:
             if config.input_configs:
                 # 提取 inputs 列表（兼容新旧格式）
                 inputs = config.input_configs.get('inputs', config.input_configs) if isinstance(config.input_configs, dict) else config.input_configs
-                await self._fill_form(target_frame, inputs, job.query_params)
+                await self._fill_form(target_frame, inputs, job.query_params, timeouts)
                 # 节点 3: 表单填充完成
                 await self._broadcast_log("info", "表单填充完成")
 
             # 7. 点击提交按钮
             self.logger.info(f"点击提交按钮: {config.submit_selector}")
-            await target_frame.click(config.submit_selector, timeout=TIMEOUTS['click'])
+            await target_frame.click(config.submit_selector, timeout=timeouts['click'])
 
             # 节点 4: 提交按钮点击
             await self._broadcast_log("info", "点击提交按钮")
@@ -931,7 +940,7 @@ class PlaywrightExecutor:
             await target_frame.wait_for_selector(
                 config.wait_selector,
                 state="visible",
-                timeout=TIMEOUTS['wait_selector']
+                timeout=timeouts['wait_selector']
             )
 
             # 额外等待确保数据完全加载（特别是动态渲染的内容）
@@ -982,43 +991,105 @@ class PlaywrightExecutor:
             if hasattr(target_frame, 'url'):
                 self.logger.info(f"target_frame URL: {target_frame.url}")
 
-            # 数据提取重试机制（针对异步加载的数据）
-            max_retries = 2
-            retry_delay = 3  # 秒
-
             extracted_data = []
             page_count = 1
 
-            for attempt in range(max_retries):
-                self.logger.info(f"=== 第 {attempt + 1} 次提取尝试 ===")
-                if config.pagination_selector and config.max_pages > 1:
-                    self.logger.info("使用分页提取")
-                    extracted_data, page_count = await self._extract_with_pagination(
+            if config.pagination_selector and config.max_pages > 1:
+                self.logger.info("使用分页提取")
+
+                # 翻页提取逻辑
+                current_page = 1
+                page_results = []
+
+                while current_page <= config.max_pages:
+                    self.logger.info(f"提取第 {current_page} 页数据")
+
+                    # 等待数据稳定
+                    await asyncio.sleep(extraction_cfg["wait_times"]["before_extraction"] / 1000)
+
+                    # 提取数据（带重试）
+                    page_data = await self._extract_with_retry(
                         target_frame,
                         config.fields_mapping,
-                        config.pagination_selector,
-                        config.wait_selector,
-                        config.max_pages,
-                        job_id
+                        extraction_cfg["retry"]
                     )
-                else:
-                    self.logger.info("使用单页提取")
-                    extracted_data = await self._extract_page_data(target_frame, config.fields_mapping)
-                    page_count = 1
 
-                self.logger.info(f"提取方法返回，数据量: {len(extracted_data)}")
+                    # 应用过滤器
+                    filtered = self._apply_filters(page_data, extraction_cfg["filters"])
+                    page_results.extend(filtered)
 
-                # 如果提取到数据，直接返回
-                if len(extracted_data) > 0:
-                    self.logger.info(f"第 {attempt + 1} 次尝试成功，提取到 {len(extracted_data)} 条数据")
-                    break
+                    self.logger.info(f"第 {current_page} 页提取 {len(filtered)} 条数据")
 
-                # 如果是最后一次尝试，不再重试
-                if attempt < max_retries - 1:
-                    self.logger.warning(f"第 {attempt + 1} 次尝试未提取到数据，{retry_delay}秒后重试...")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    self.logger.warning(f"已尝试 {max_retries} 次，仍未提取到数据")
+                    # 广播进度
+                    await self._broadcast_progress(
+                        job_id=job_id,
+                        data={
+                            "current_page": current_page,
+                            "total_pages": config.max_pages,
+                            "status": "processing"
+                        }
+                    )
+
+                    # 检查是否需要翻页
+                    if current_page >= config.max_pages:
+                        self.logger.info(f"已达到最大页数 {config.max_pages}")
+                        break
+
+                    # 检查下一页按钮是否存在
+                    next_button = target_frame.locator(config.pagination_selector)
+                    count = await next_button.count()
+
+                    if count == 0:
+                        self.logger.info("下一页按钮不存在，停止翻页")
+                        break
+
+                    # 检查按钮是否可用
+                    is_disabled = await next_button.is_disabled()
+                    if is_disabled:
+                        self.logger.info("下一页按钮已禁用，停止翻页")
+                        break
+
+                    # 点击下一页
+                    self.logger.info("点击下一页按钮")
+                    await next_button.click(timeout=timeouts['click'])
+
+                    if job_id:
+                        await self._broadcast_log("info", f"点击下一页按钮（第 {current_page + 1} 页）")
+
+                    # 等待新页面加载
+                    await target_frame.wait_for_selector(
+                        config.wait_selector,
+                        state="visible",
+                        timeout=timeouts['wait_selector']
+                    )
+
+                    # 页面切换后等待
+                    await asyncio.sleep(extraction_cfg["wait_times"]["after_click"] / 1000)
+
+                    # 页面之间的等待
+                    await asyncio.sleep(extraction_cfg["wait_times"]["between_pages"] / 1000)
+
+                    current_page += 1
+
+                extracted_data = page_results
+                page_count = current_page
+
+            else:
+                self.logger.info("使用单页提取")
+
+                # 等待数据稳定
+                await asyncio.sleep(extraction_cfg["wait_times"]["before_extraction"] / 1000)
+
+                # 提取数据（带重试）
+                page_data = await self._extract_with_retry(
+                    target_frame,
+                    config.fields_mapping,
+                    extraction_cfg["retry"]
+                )
+
+                # 应用过滤器
+                extracted_data = self._apply_filters(page_data, extraction_cfg["filters"])
+                page_count = 1
 
             self.logger.info(f"数据提取完成，共 {page_count} 页，{len(extracted_data)} 条数据")
 
