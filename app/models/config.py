@@ -1,6 +1,6 @@
 # app/models/config.py
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from sqlalchemy import String, Integer, Boolean, JSON, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -25,7 +25,7 @@ class CrawlerConfig(Base):
     login_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="登录页地址")
 
     # 页面交互配置
-    input_configs: Mapped[dict] = mapped_column(JSON, nullable=False, comment="多输入框配置")
+    input_configs: Mapped[Any] = mapped_column(JSON, nullable=False, comment="多输入框配置")
     submit_selector: Mapped[str] = mapped_column(String(200), nullable=False, comment="查询按钮选择器")
     wait_selector: Mapped[str] = mapped_column(String(200), nullable=False, comment="等待加载完成的选择器")
     fields_mapping: Mapped[dict] = mapped_column(JSON, nullable=False, comment="数据提取规则")
@@ -42,6 +42,12 @@ class CrawlerConfig(Base):
         nullable=False,
         comment="创建时间"
     )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        nullable=True,
+        default=None,
+        comment="删除时间（逻辑删除）"
+    )
 
     # 关系定义（一对多：一个配置对应多个任务）
     jobs: Mapped[list["JobQueue"]] = relationship(
@@ -53,6 +59,7 @@ class CrawlerConfig(Base):
     # 索引
     __table_args__ = (
         Index("idx_auth_profile", "auth_profile"),
+        Index("idx_deleted_at", "deleted_at"),
     )
 
     def __repr__(self) -> str:

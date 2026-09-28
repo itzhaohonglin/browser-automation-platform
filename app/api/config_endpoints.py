@@ -2,6 +2,7 @@
 配置管理 API 端点
 """
 import logging
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
@@ -70,7 +71,7 @@ async def create_config(
         )
 
 
-@router.get("", response_model=ConfigListResponse)
+@router.get("")
 async def get_configs(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
@@ -87,11 +88,11 @@ async def get_configs(
         db: 数据库会话
 
     Returns:
-        ConfigListResponse: 配置列表响应
+        dict: 配置列表响应
     """
     try:
-        # 构建查询条件
-        query = select(CrawlerConfig)
+        # 构建查询条件（过滤已删除的记录）
+        query = select(CrawlerConfig).where(CrawlerConfig.deleted_at.is_(None))
         if is_active is not None:
             query = query.where(CrawlerConfig.is_active == is_active)
 
@@ -106,13 +107,37 @@ async def get_configs(
         result = await db.execute(query)
         configs = result.scalars().all()
 
-        # 返回响应
-        return ConfigListResponse(
-            total=total,
-            page=page,
-            page_size=page_size,
-            items=[ConfigResponse.model_validate(config) for config in configs]
-        )
+        logger.info(f"查询到 {len(configs)} 条配置记录")
+
+        # 手动构造响应，避免Pydantic验证
+        items = []
+        for i, config in enumerate(configs):
+            logger.debug(f"处理配置 {i+1}/{len(configs)}, ID={config.id}, input_configs类型={type(config.input_configs)}")
+            items.append({
+                "id": config.id,
+                "config_name": config.config_name,
+                "target_url": str(config.target_url),
+                "need_login": config.need_login,
+                "auth_profile": config.auth_profile,
+                "login_url": str(config.login_url) if config.login_url else None,
+                "input_configs": config.input_configs,  # 直接返回，无论是列表还是字典
+                "submit_selector": config.submit_selector,
+                "wait_selector": config.wait_selector,
+                "fields_mapping": config.fields_mapping,
+                "pagination_selector": config.pagination_selector,
+                "max_pages": config.max_pages,
+                "is_active": config.is_active,
+                "created_at": config.created_at.isoformat()
+            })
+
+        logger.info(f"成功构造 {len(items)} 个配置项")
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "items": items
+        }
 
     except Exception as e:
         logger.error(f"配置列表查询失败: {e}", exc_info=True)
@@ -138,8 +163,14 @@ async def get_config(config_id: int, db: AsyncSession = Depends(get_db)):
         HTTPException: 404 配置不存在
     """
     try:
-        # 查询配置
-        config = await db.get(CrawlerConfig, config_id)
+        # 查询配置（过滤已删除的记录）
+        query = select(CrawlerConfig).where(
+            CrawlerConfig.id == config_id,
+            CrawlerConfig.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        config = result.scalar_one_or_none()
+
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -180,8 +211,14 @@ async def update_config(
         HTTPException: 404 配置不存在, 422 验证失败
     """
     try:
-        # 查询配置
-        config = await db.get(CrawlerConfig, config_id)
+        # 查询配置（过滤已删除的记录）
+        query = select(CrawlerConfig).where(
+            CrawlerConfig.id == config_id,
+            CrawlerConfig.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        config = result.scalar_one_or_none()
+
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -219,7 +256,7 @@ async def update_config(
 @router.delete("/{config_id}")
 async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
     """
-    删除配置
+    删除配置（逻辑删除）
 
     Args:
         config_id: 配置 ID
@@ -229,36 +266,28 @@ async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
         dict: 成功消息
 
     Raises:
-        HTTPException: 404 配置不存在, 409 存在待执行任务
+        HTTPException: 404 配置不存在
     """
     try:
-        # 查询配置
-        config = await db.get(CrawlerConfig, config_id)
+        # 查询配置（过滤已删除的记录）
+        query = select(CrawlerConfig).where(
+            CrawlerConfig.id == config_id,
+            CrawlerConfig.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        config = result.scalar_one_or_none()
+
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"配置不存在: id={config_id}"
             )
 
-        # 检查是否有待执行任务
-        query = select(func.count()).where(
-            JobQueue.config_id == config_id,
-            JobQueue.status == JobStatus.PENDING
-        )
-        result = await db.execute(query)
-        pending_count = result.scalar()
-
-        if pending_count > 0:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"配置存在 {pending_count} 个待执行任务，无法删除"
-            )
-
-        # 删除配置
-        await db.delete(config)
+        # 逻辑删除：设置 deleted_at 时间戳
+        config.deleted_at = datetime.now()
         await db.commit()
 
-        logger.info(f"配置删除成功: id={config_id}")
+        logger.info(f"配置逻辑删除成功: id={config_id}")
 
         # 返回成功消息
         return {"message": f"配置删除成功: id={config_id}"}

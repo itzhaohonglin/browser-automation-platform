@@ -1,7 +1,7 @@
 # app/schemas/config.py
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Union, Any, Annotated
 from datetime import datetime
-from pydantic import BaseModel, Field, HttpUrl, model_validator, ConfigDict
+from pydantic import BaseModel, Field, HttpUrl, model_validator, field_validator, ConfigDict, field_serializer, SkipValidation
 
 
 class ConfigBase(BaseModel):
@@ -12,13 +12,18 @@ class ConfigBase(BaseModel):
     need_login: bool = Field(default=False, description="是否需要登录")
     auth_profile: Optional[str] = Field(None, max_length=50, description="登录态标识")
     login_url: Optional[HttpUrl] = Field(None, description="登录页地址")
-    input_configs: Dict = Field(..., description="输入框配置（JSON）")
+    input_configs: Annotated[Any, SkipValidation] = Field(..., description="输入框配置（JSON，支持列表或字典）")
     submit_selector: str = Field(..., min_length=1, max_length=200, description="提交按钮选择器")
     wait_selector: str = Field(..., min_length=1, max_length=200, description="等待加载选择器")
     fields_mapping: Dict = Field(..., description="字段映射规则（JSON）")
     pagination_selector: Optional[str] = Field(None, max_length=200, description="下一页按钮选择器")
     max_pages: int = Field(default=1, ge=1, description="最大翻页数")
     is_active: bool = Field(default=True, description="是否启用")
+
+    model_config = ConfigDict(
+        # 禁用严格模式，允许Any类型接受任何值
+        arbitrary_types_allowed=True,
+    )
 
 
 class ConfigCreate(ConfigBase):
@@ -40,7 +45,7 @@ class ConfigUpdate(BaseModel):
     need_login: Optional[bool] = Field(None, description="是否需要登录")
     auth_profile: Optional[str] = Field(None, max_length=50, description="登录态标识")
     login_url: Optional[HttpUrl] = Field(None, description="登录页地址")
-    input_configs: Optional[Dict] = Field(None, description="输入框配置（JSON）")
+    input_configs: Optional[Annotated[Any, SkipValidation]] = Field(None, description="输入框配置（JSON，支持列表或字典）")
     submit_selector: Optional[str] = Field(None, min_length=1, max_length=200, description="提交按钮选择器")
     wait_selector: Optional[str] = Field(None, min_length=1, max_length=200, description="等待加载选择器")
     fields_mapping: Optional[Dict] = Field(None, description="字段映射规则（JSON）")
@@ -62,7 +67,10 @@ class ConfigResponse(ConfigBase):
     id: int = Field(..., description="配置 ID")
     created_at: datetime = Field(..., description="创建时间")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        arbitrary_types_allowed=True
+    )
 
 
 class ConfigListResponse(BaseModel):
