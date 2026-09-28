@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +49,7 @@ class AlertEngine:
     async def _evaluate_single_rule(self, rule: AlertRule, session: AsyncSession):
         """评估单条告警规则"""
         # 查询最近时间窗口内的指标数据
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(seconds=rule.duration_seconds)
 
         metrics = await self._query_metrics(
@@ -82,7 +82,7 @@ class AlertEngine:
             alert = await self._create_alert(rule, latest_metric, session)
 
             # 发送通知
-            await self._send_notifications(rule, alert, latest_metric)
+            await self._send_notifications(rule, alert, latest_metric, session)
 
     async def _query_metrics(
         self,
@@ -108,6 +108,8 @@ class AlertEngine:
         threshold: float
     ) -> bool:
         """检查是否应该触发告警"""
+        epsilon = 1e-9  # 容差
+
         if condition == ">":
             return value > threshold
         elif condition == ">=":
@@ -117,9 +119,9 @@ class AlertEngine:
         elif condition == "<=":
             return value <= threshold
         elif condition == "==":
-            return value == threshold
+            return abs(value - threshold) < epsilon
         elif condition == "!=":
-            return value != threshold
+            return abs(value - threshold) >= epsilon
         else:
             self.logger.error(f"不支持的条件运算符: {condition}")
             return False
@@ -136,12 +138,12 @@ class AlertEngine:
             f"指标名称: {rule.metric_name}\n"
             f"当前值: {metric.metric_value}\n"
             f"阈值: {rule.threshold}\n"
-            f"触发时间: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"触发时间: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
         alert = AlertHistory(
             rule_id=rule.id,
-            triggered_at=datetime.utcnow(),
+            triggered_at=datetime.now(timezone.utc),
             alert_message=alert_message,
             metric_value=metric.metric_value,
             notify_status="pending"
@@ -157,10 +159,12 @@ class AlertEngine:
         self,
         rule: AlertRule,
         alert: AlertHistory,
-        metric: MetricsTimeSeries
+        metric: MetricsTimeSeries,
+        session: AsyncSession
     ):
         """发送告警通知到所有配置的渠道"""
         message = alert.alert_message
+        results = []  # 收集所有渠道结果
 
         for channel in rule.channels:
             try:
@@ -172,17 +176,26 @@ class AlertEngine:
                     await self.wecom_notifier.send(message)
                 else:
                     self.logger.warning(f"不支持的通知渠道: {channel}")
+                    results.append(False)
+                    continue
 
                 self.logger.info(f"通知已发送到 {channel}")
+                results.append(True)
 
             except Exception as e:
                 self.logger.error(f"发送 {channel} 通知失败: {e}", exc_info=True)
+                results.append(False)
 
-                # 更新告警历史的通知状态
-                async with get_session() as session:
-                    alert.notify_status = "failed"
-                    alert.notify_error = str(e)
-                    await session.commit()
+        # 统一更新通知状态
+        if all(results):
+            alert.notify_status = "success"
+        elif any(results):
+            alert.notify_status = "partial_success"
+        else:
+            alert.notify_status = "failed"
+            alert.notify_error = f"{len(results)} 个渠道全部失败"
+
+        await session.commit()
 
 
 # 全局实例
