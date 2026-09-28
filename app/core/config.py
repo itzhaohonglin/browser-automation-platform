@@ -30,6 +30,21 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[str] = None
 
+    # 告警邮件配置
+    SMTP_HOST: str = "smtp.example.com"
+    SMTP_PORT: int = 587
+    SMTP_USE_TLS: bool = True
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    ALERT_EMAIL_FROM: Optional[str] = None
+    ALERT_EMAIL_TO: Optional[str] = None
+
+    # 钉钉机器人
+    DINGTALK_WEBHOOK_URL: Optional[str] = None
+
+    # 企业微信机器人
+    WECOM_WEBHOOK_URL: Optional[str] = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
