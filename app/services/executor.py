@@ -40,6 +40,218 @@ class PlaywrightExecutor:
         self.ws_manager = ws_manager
         self.logger = logger
 
+    def _load_timeouts(self, config: CrawlerConfig) -> Dict:
+        """
+        加载超时配置
+
+        Args:
+            config: 配置对象
+
+        Returns:
+            超时配置字典（毫秒）
+        """
+        # 默认超时配置
+        timeouts = {
+            "page_load": 30000,
+            "wait_selector": 15000,
+            "navigation": 30000,
+            "click": 10000,
+        }
+
+        # 如果配置中有自定义超时，则合并
+        if config.timeout_config:
+            timeouts.update(config.timeout_config)
+            self.logger.info(f"使用自定义超时配置: {config.timeout_config}")
+
+        return timeouts
+
+    def _load_extraction_config(self, config: CrawlerConfig) -> Dict:
+        """
+        加载提取配置（过滤器、等待时间、重试等）
+
+        Args:
+            config: 配置对象
+
+        Returns:
+            提取配置字典
+        """
+        # 默认提取配置
+        extraction_config = {
+            "filters": [],
+            "wait_times": {
+                "before_extraction": 3000,
+                "after_click": 1000,
+                "between_pages": 2000
+            },
+            "retry": {
+                "max_attempts": 2,
+                "delay_seconds": 3
+            }
+        }
+
+        # 如果配置中有自定义提取配置，深度合并
+        if config.extraction_config:
+            # 合并 filters
+            if "filters" in config.extraction_config:
+                extraction_config["filters"] = config.extraction_config["filters"]
+
+            # 合并 wait_times
+            if "wait_times" in config.extraction_config:
+                extraction_config["wait_times"].update(config.extraction_config["wait_times"])
+
+            # 合并 retry
+            if "retry" in config.extraction_config:
+                extraction_config["retry"].update(config.extraction_config["retry"])
+
+            self.logger.info(f"使用自定义提取配置: {config.extraction_config}")
+
+        return extraction_config
+
+    def _apply_filters(self, data: List[Dict], filters: List[Dict]) -> List[Dict]:
+        """
+        应用过滤器到提取的数据
+
+        Args:
+            data: 原始数据列表
+            filters: 过滤器配置列表
+                格式: [
+                    {
+                        "field_index": 1,
+                        "type": "regex",
+                        "pattern": "^[A-Z0-9]{6,}",
+                        "action": "keep"
+                    },
+                    {
+                        "field_index": 2,
+                        "type": "length",
+                        "min": 2,
+                        "max": 100,
+                        "action": "drop"
+                    }
+                ]
+
+        Returns:
+            过滤后的数据列表
+        """
+        if not filters:
+            return data
+
+        import re
+
+        filtered_data = []
+
+        for row in data:
+            # 转换为值列表
+            values = list(row.values())
+
+            # 默认保留该行
+            should_keep = True
+
+            for filter_rule in filters:
+                # 获取字段索引
+                field_index = filter_rule.get("field_index", 0)
+
+                # 检查索引是否有效
+                if field_index >= len(values):
+                    self.logger.warning(f"field_index {field_index} 超出范围，跳过此过滤器")
+                    continue
+
+                # 获取字段值
+                field_value = values[field_index]
+
+                # 获取过滤类型和动作
+                filter_type = filter_rule.get("type")
+                action = filter_rule.get("action", "keep")
+
+                # 判断是否匹配
+                is_match = False
+
+                if filter_type == "regex":
+                    # 正则表达式过滤
+                    pattern = filter_rule.get("pattern", "")
+                    if pattern and re.match(pattern, str(field_value)):
+                        is_match = True
+
+                elif filter_type == "length":
+                    # 长度过滤
+                    min_length = filter_rule.get("min", 0)
+                    max_length = filter_rule.get("max", float('inf'))
+                    value_length = len(str(field_value))
+
+                    if min_length <= value_length <= max_length:
+                        is_match = True
+
+                elif filter_type == "empty":
+                    # 空值检测
+                    is_empty = not field_value or str(field_value).strip() == ""
+                    allow_empty = filter_rule.get("allow_empty", False)
+
+                    # 如果允许空值且字段为空，或字段非空，则匹配
+                    if (allow_empty and is_empty) or (not is_empty):
+                        is_match = True
+
+                # 根据 action 和 is_match 决定是否保留
+                if action == "keep":
+                    # keep 模式：匹配则保留，不匹配则丢弃
+                    if not is_match:
+                        should_keep = False
+                        break
+                elif action == "drop":
+                    # drop 模式：匹配则丢弃，不匹配则保留
+                    if is_match:
+                        should_keep = False
+                        break
+
+            if should_keep:
+                filtered_data.append(row)
+
+        self.logger.info(f"过滤器应用完成: {len(data)} -> {len(filtered_data)} 条数据")
+        return filtered_data
+
+    async def _extract_with_retry(
+        self,
+        page: Union[Page, Frame],
+        fields_mapping: Dict,
+        retry_config: Dict
+    ) -> List[Dict]:
+        """
+        带重试机制的数据提取
+
+        Args:
+            page: 页面对象或 Frame 对象
+            fields_mapping: 字段映射规则
+            retry_config: 重试配置
+                格式: {"max_attempts": 2, "delay_seconds": 3}
+
+        Returns:
+            提取的数据列表
+        """
+        max_attempts = retry_config.get("max_attempts", 2)
+        delay_seconds = retry_config.get("delay_seconds", 3)
+
+        for attempt in range(max_attempts):
+            self.logger.info(f"第 {attempt + 1}/{max_attempts} 次提取尝试")
+
+            try:
+                data = await self._extract_page_data(page, fields_mapping)
+
+                if len(data) > 0:
+                    self.logger.info(f"第 {attempt + 1} 次尝试成功，提取到 {len(data)} 条数据")
+                    return data
+                else:
+                    self.logger.warning(f"第 {attempt + 1} 次尝试未提取到数据")
+
+            except Exception as e:
+                self.logger.error(f"第 {attempt + 1} 次提取失败: {e}")
+
+            # 如果不是最后一次尝试，等待后重试
+            if attempt < max_attempts - 1:
+                self.logger.info(f"等待 {delay_seconds} 秒后重试...")
+                await asyncio.sleep(delay_seconds)
+
+        self.logger.warning(f"已尝试 {max_attempts} 次，仍未成功提取数据")
+        return []
+
     async def _broadcast_progress(self, job_id: int, data: Dict):
         """
         推送进度消息（遵循 PRD V2.0 格式）
