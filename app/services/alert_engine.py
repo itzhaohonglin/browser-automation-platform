@@ -53,6 +53,25 @@ class AlertEngine:
         result = await session.execute(stmt)
         return result.scalars().all()
 
+    def _is_in_silence_period(self, rule: AlertRule) -> bool:
+        """
+        检查告警规则是否在静默期内
+
+        Args:
+            rule: 告警规则
+
+        Returns:
+            bool: True 表示在静默期，不应触发告警
+        """
+        if not rule.last_alert_at:
+            # 首次告警，不在静默期
+            return False
+
+        silence_duration = timedelta(seconds=rule.silence_duration)
+        time_since_last_alert = datetime.now(timezone.utc) - rule.last_alert_at
+
+        return time_since_last_alert < silence_duration
+
     async def _evaluate_single_rule(self, rule: AlertRule, session: AsyncSession):
         """评估单条告警规则"""
         # 查询最近时间窗口内的指标数据
@@ -79,6 +98,14 @@ class AlertEngine:
         )
 
         if should_trigger:
+            # 检查是否在静默期
+            if self._is_in_silence_period(rule):
+                self.logger.info(
+                    f"规则 {rule.rule_name} 触发但在静默期内，跳过告警 "
+                    f"(上次告警: {rule.last_alert_at.strftime('%Y-%m-%d %H:%M:%S') if rule.last_alert_at else 'N/A'})"
+                )
+                return
+
             self.logger.warning(
                 f"规则 {rule.rule_name} 触发告警: "
                 f"{rule.metric_name}={latest_metric.metric_value} "
@@ -87,6 +114,10 @@ class AlertEngine:
 
             # 创建告警历史
             alert = await self._create_alert(rule, latest_metric, session)
+
+            # 更新 last_alert_at
+            rule.last_alert_at = datetime.now(timezone.utc)
+            await session.commit()
 
             # 发送通知
             await self._send_notifications(rule, alert, latest_metric, session)

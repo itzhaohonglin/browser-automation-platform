@@ -1,5 +1,5 @@
 # app/models/metrics.py
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import String, Integer, Float, Boolean, JSON, Text, DateTime, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -57,17 +57,21 @@ class AlertRule(Base):
     # 状态字段
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="是否启用")
 
+    # 告警静默相关字段
+    silence_duration: Mapped[int] = mapped_column(Integer, default=3600, nullable=False, comment="静默时长（秒），默认1小时")
+    last_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, comment="上次告警时间")
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=func.now(),
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
         nullable=False,
         comment="创建时间"
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=func.now(),
-        onupdate=func.now(),
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
         comment="更新时间"
     )

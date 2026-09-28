@@ -12,6 +12,7 @@ class AlertRuleCreate(BaseModel):
     duration_seconds: int = Field(default=60, ge=10)
     channels: List[str] = Field(..., min_items=1)
     enabled: bool = Field(default=True)
+    silence_duration: int = Field(default=3600, ge=60, description="静默时长（秒）")
 
 
 class AlertRuleUpdate(BaseModel):
@@ -23,6 +24,7 @@ class AlertRuleUpdate(BaseModel):
     duration_seconds: Optional[int] = Field(None, ge=10)
     channels: Optional[List[str]] = Field(None, min_items=1)
     enabled: Optional[bool] = None
+    silence_duration: Optional[int] = Field(None, ge=60, description="静默时长（秒）")
 
 
 class AlertRuleResponse(BaseModel):
@@ -35,6 +37,8 @@ class AlertRuleResponse(BaseModel):
     duration_seconds: int
     channels: List[str]
     enabled: bool
+    silence_duration: int
+    last_alert_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
