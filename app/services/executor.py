@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import os
-from typing import Optional, Dict, List, Tuple, Literal
+import time
+from typing import Optional, Dict, List, Tuple, Literal, Union
 from datetime import datetime
 
-from playwright.async_api import async_playwright, Browser, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import async_playwright, Browser, Page, Frame, TimeoutError as PlaywrightTimeoutError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,6 +13,7 @@ from sqlalchemy import select
 from app.models.job import JobQueue, JobStatus
 from app.models.config import CrawlerConfig
 from app.models.result import CrawlerResult
+from app.services.metrics_collector import metrics_collector
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class PlaywrightExecutor:
 
     async def _fill_form(
         self,
-        page: Page,
+        page: Union[Page, Frame],
         input_configs: List[Dict],
         query_params: Dict
     ):
@@ -91,7 +93,7 @@ class PlaywrightExecutor:
         填充表单
 
         Args:
-            page: 页面对象
+            page: 页面对象或 Frame 对象
             input_configs: 输入配置列表
             query_params: 查询参数（用于占位符替换）
         """
@@ -99,19 +101,24 @@ class PlaywrightExecutor:
 
         for input_cfg in input_configs:
             selector = input_cfg['selector']
-            value_template = input_cfg['value']
-            input_type = input_cfg.get('type', 'fill')
+            param_key = input_cfg.get('param_key')
+            input_type = input_cfg.get('input_type', 'text')
 
-            # 占位符替换
-            try:
-                value = value_template.format(**query_params)
-            except KeyError as e:
-                raise ValueError(f"占位符替换失败，缺少参数: {e}")
+            # 从 query_params 中获取值
+            if param_key:
+                value = query_params.get(param_key, '')
+            else:
+                # 向后兼容：如果有 value 字段，使用占位符替换
+                value_template = input_cfg.get('value', '')
+                try:
+                    value = value_template.format(**query_params) if value_template else ''
+                except KeyError as e:
+                    raise ValueError(f"占位符替换失败，缺少参数: {e}")
 
             self.logger.info(f"填充字段: {selector} = {value} (类型: {input_type})")
 
             try:
-                if input_type == 'fill':
+                if input_type == 'text' or input_type == 'fill':
                     await page.fill(selector, value, timeout=TIMEOUTS['click'])
                 elif input_type == 'select':
                     await page.select_option(selector, value, timeout=TIMEOUTS['click'])
@@ -127,86 +134,225 @@ class PlaywrightExecutor:
 
         self.logger.info("表单填充完成")
 
-    async def _extract_page_data(self, page: Page, fields_mapping: Dict) -> List[Dict]:
+    async def _extract_page_data(self, page: Union[Page, Frame], fields_mapping: Dict) -> List[Dict]:
         """
         提取当前页面的数据（在浏览器端一次性完成，性能优化）
 
         Args:
-            page: 页面对象
-            fields_mapping: 字段映射规则（如 {"title": ".product-title text", "link": ".detail-link @href"}）
+            page: 页面对象或 Frame 对象
+            fields_mapping: 字段映射规则
+                新格式: {"list_selector": "...", "fields": [{"name": "...", "selector": "...", "attr": "..."}]}
+                旧格式: {"title": ".product-title text", "link": ".detail-link @href"}
 
         Returns:
             提取的数据列表
         """
         self.logger.info("开始提取当前页数据")
 
-        # 解析第一个字段的选择器作为容器选择器
-        first_field = list(fields_mapping.keys())[0]
-        first_rule = fields_mapping[first_field]
-        parts = first_rule.split()
-        container_selector = parts[0]
+        # 诊断：检查 page 对象是否有效
+        try:
+            page_url = page.url if hasattr(page, 'url') else 'N/A'
+            self.logger.info(f"提取数据的 page/frame URL: {page_url}")
+        except Exception as e:
+            self.logger.warning(f"无法获取 page URL: {e}")
 
-        self.logger.info(f"使用容器选择器: {container_selector}")
+        # 适配新旧格式
+        if 'list_selector' in fields_mapping and 'fields' in fields_mapping:
+            # 新格式
+            container_selector = fields_mapping['list_selector']
+            fields = fields_mapping['fields']
 
-        # 在浏览器端一次性提取所有数据
-        page_data = await page.evaluate("""
-            (config) => {
-                const { containerSelector, fieldsMapping } = config;
-                const result = [];
+            self.logger.info(f"使用容器选择器（新格式）: {container_selector}")
+            self.logger.info(f"字段数量: {len(fields)}")
+            self.logger.info(f"字段列表: {[f['name'] for f in fields]}")
 
-                // 查找所有容器元素
-                const containers = document.querySelectorAll(containerSelector);
+            # 在浏览器端一次性提取所有数据
+            self.logger.info("开始执行 JavaScript 提取...")
+            page_data = await page.evaluate("""
+                (config) => {
+                    const { containerSelector, fields } = config;
+                    const result = [];
 
-                containers.forEach(container => {
-                    const row = {};
+                    // 查找所有容器元素
+                    let containers = document.querySelectorAll(containerSelector);
+                    console.log('[提取] 容器选择器:', containerSelector);
+                    console.log('[提取] 初始找到容器数量:', containers.length);
 
-                    for (const [fieldName, selectorRule] of Object.entries(fieldsMapping)) {
-                        let value = '';
-
-                        try {
-                            // 解析选择器规则（格式：".selector text" 或 ".selector @attr"）
-                            const parts = selectorRule.trim().split(/\\s+/);
-                            const selector = parts[0];
-                            const extractType = parts.length > 1 ? parts[1] : 'text';
-
-                            // 在容器内查找元素
-                            const element = container.querySelector(selector);
-
-                            if (element) {
-                                if (extractType === 'text') {
-                                    // 提取文本内容
-                                    value = element.innerText || element.textContent || '';
-                                } else if (extractType.startsWith('@')) {
-                                    // 提取属性（如 @href, @src）
-                                    const attrName = extractType.substring(1);
-                                    value = element.getAttribute(attrName) || '';
-                                } else {
-                                    // 默认提取文本
-                                    value = element.innerText || element.textContent || '';
-                                }
-
-                                // 去除首尾空白
-                                value = value.trim();
-                            }
-                        } catch (error) {
-                            // 忽略错误，返回空字符串
-                            console.warn(`提取字段 ${fieldName} 失败:`, error);
-                        }
-
-                        row[fieldName] = value;
+                    // 如果容器数量少于预期，等待一下（可能是异步渲染）
+                    // 注意：这是同步代码中的简单重试，不是真正的异步等待
+                    if (containers.length < 4) {
+                        console.log('[提取] 容器数量少于4，可能数据未完全加载');
                     }
 
-                    result.push(row);
-                });
+                    containers.forEach((container, containerIndex) => {
+                        // 跳过 jqGrid 占位行
+                        if (container.classList.contains('jqgfirstrow')) {
+                            console.log(`[提取] 跳过占位行 ${containerIndex}`);
+                            return;
+                        }
 
-                return result;
-            }
-        """, {
-            "containerSelector": container_selector,
-            "fieldsMapping": fields_mapping
-        })
+                        const row = {};
+                        let hasNonEmptyField = false;
+
+                        fields.forEach((field, fieldIndex) => {
+                            let value = '';
+                            const { name, selector, attr } = field;
+
+                            try {
+                                // 在容器内查找元素
+                                const element = container.querySelector(selector);
+
+                                if (element) {
+                                    if (attr === 'text') {
+                                        value = element.innerText || element.textContent || '';
+                                    } else if (attr === 'href' || attr === 'src') {
+                                        value = element.getAttribute(attr) || '';
+                                    } else {
+                                        value = element.getAttribute(attr) || '';
+                                    }
+                                }
+                            } catch (e) {
+                                console.error(`提取字段 ${name} 失败:`, e);
+                            }
+
+                            const trimmedValue = value.trim();
+                            row[name] = trimmedValue;
+
+                            if (trimmedValue.length > 0) {
+                                hasNonEmptyField = true;
+                            }
+                        });
+
+                        // 调试：打印前5行的详细信息
+                        if (containerIndex < 5) {
+                            const values = Object.values(row);
+                            console.log(`[提取] 行${containerIndex}: classList=${Array.from(container.classList).join(',')}, hasNonEmpty=${hasNonEmptyField}, 第1字段="${values[0]?.substring(0, 20)}", 第2字段="${values[1]?.substring(0, 30)}"`);
+                        }
+
+                        // 只添加至少有一个非空字段的行
+                        if (hasNonEmptyField) {
+                            result.push(row);
+                        }
+                    });
+
+                    return result;
+                }
+            """, {"containerSelector": container_selector, "fields": fields})
+
+            self.logger.info(f"JavaScript 执行完成，原始数据量: {len(page_data)}")
+
+            # 输出浏览器控制台日志
+            if hasattr(self, 'console_logs') and self.console_logs:
+                self.logger.info(f"浏览器控制台日志 ({len(self.console_logs)} 条):")
+                for log in self.console_logs[:20]:  # 最多显示前20条
+                    try:
+                        self.logger.info(f"  [JS] {log}")
+                    except:
+                        pass
+                # 清空日志避免累积
+                self.console_logs = []
+
+            # Python 端智能过滤：移除无效数据行
+            self.logger.info("开始 Python 端过滤...")
+            filtered_data = []
+            for idx, row in enumerate(page_data):
+                # 获取第二个字段（通常是编码字段）
+                values = list(row.values())
+                self.logger.info(f"  行 {idx}: 字段数={len(values)}")
+                if len(values) < 2:
+                    self.logger.info(f"  行 {idx}: 字段数不足，跳过")
+                    continue
+
+                second_field = values[1].strip()
+                self.logger.info(f"  行 {idx}: 第二字段='{second_field[:50]}'")
+
+                # 检查是否为有效编码（以字母或数字开头，长度 > 5）
+                import re
+                if re.match(r'^[A-Z0-9][A-Z0-9]{5,}', second_field):
+                    filtered_data.append(row)
+                    self.logger.info(f"  行 {idx}: ✓ 保留")
+                else:
+                    self.logger.info(f"  行 {idx}: ✗ 过滤")
+
+            self.logger.info(f"过滤后数据量: {len(filtered_data)}")
+            page_data = filtered_data
+
+        else:
+            # 旧格式：保持原有逻辑
+            first_field = list(fields_mapping.keys())[0]
+            first_rule = fields_mapping[first_field]
+            parts = first_rule.split()
+            container_selector = parts[0]
+
+            self.logger.info(f"使用容器选择器（旧格式）: {container_selector}")
+
+            # 在浏览器端一次性提取所有数据
+            page_data = await page.evaluate("""
+                (config) => {
+                    const { containerSelector, fieldsMapping } = config;
+                    const result = [];
+
+                    // 查找所有容器元素
+                    const containers = document.querySelectorAll(containerSelector);
+
+                    containers.forEach(container => {
+                        const row = {};
+
+                        for (const [fieldName, selectorRule] of Object.entries(fieldsMapping)) {
+                            let value = '';
+
+                            try {
+                                // 解析选择器规则（格式：".selector text" 或 ".selector @attr"）
+                                const parts = selectorRule.trim().split(/\\s+/);
+                                const selector = parts[0];
+                                const extractType = parts.length > 1 ? parts[1] : 'text';
+
+                                // 在容器内查找元素
+                                const element = container.querySelector(selector);
+
+                                if (element) {
+                                    if (extractType === 'text') {
+                                        // 提取文本内容
+                                        value = element.innerText || element.textContent || '';
+                                    } else if (extractType.startsWith('@')) {
+                                        // 提取属性（如 @href, @src）
+                                        const attrName = extractType.substring(1);
+                                        value = element.getAttribute(attrName) || '';
+                                    } else {
+                                        // 默认提取文本
+                                        value = element.innerText || element.textContent || '';
+                                    }
+
+                                    // 去除首尾空白
+                                    value = value.trim();
+                                }
+                            } catch (error) {
+                                // 忽略错误，返回空字符串
+                                console.warn(`提取字段 ${fieldName} 失败:`, error);
+                            }
+
+                            row[fieldName] = value;
+                        }
+
+                        result.push(row);
+                    });
+
+                    return result;
+                }
+            """, {
+                "containerSelector": container_selector,
+                "fieldsMapping": fields_mapping
+            })
 
         self.logger.info(f"提取到 {len(page_data)} 条数据")
+
+        # 打印前5条数据用于调试
+        for i, item in enumerate(page_data[:5]):
+            # 打印每条数据的第一个字段
+            if item:
+                first_key = list(item.keys())[0] if item.keys() else None
+                first_value = item.get(first_key, '') if first_key else ''
+                self.logger.info(f"数据行 {i+1} - {first_key}: '{first_value[:50]}'")
 
         if len(page_data) == 0:
             self.logger.warning("未找到任何数据项")
@@ -215,7 +361,7 @@ class PlaywrightExecutor:
 
     async def _extract_with_pagination(
         self,
-        page: Page,
+        page: Union[Page, Frame],
         fields_mapping: Dict,
         pagination_selector: str,
         wait_selector: str,
@@ -226,7 +372,7 @@ class PlaywrightExecutor:
         翻页提取数据
 
         Args:
-            page: 页面对象
+            page: 页面对象或 Frame 对象
             fields_mapping: 字段映射规则
             pagination_selector: 下一页按钮选择器
             wait_selector: 等待加载完成的选择器
@@ -382,7 +528,8 @@ class PlaywrightExecutor:
         Returns:
             执行结果字典
         """
-        start_time = datetime.now()  # Will be used in future tasks for execution timing
+        start_time = time.time()
+        success = False
         browser = None
         context = None
         playwright = None
@@ -426,6 +573,12 @@ class PlaywrightExecutor:
             browser, context, playwright = await self._launch_browser(config)
             page = await context.new_page()
 
+            # 监听浏览器控制台（用于调试）
+            self.console_logs = []
+            def handle_console(msg):
+                self.console_logs.append(msg.text)
+            page.on("console", handle_console)
+
             self.logger.info(f"浏览器启动成功（登录态: {config.auth_profile if config.need_login else '无'}）")
 
             # 节点 2: 浏览器启动完成
@@ -435,51 +588,229 @@ class PlaywrightExecutor:
             )
 
             # 4. 访问目标 URL
-            await page.goto(config.target_url, timeout=TIMEOUTS['page_load'])
+            await page.goto(config.target_url, timeout=TIMEOUTS['page_load'], wait_until='networkidle')
             self.logger.info(f"访问目标 URL: {config.target_url}")
 
-            # 5. 填充表单
+            # 等待页面完全加载（iframe 内容可能需要额外时间渲染）
+            await asyncio.sleep(10)
+            await self._broadcast_log("info", "页面加载完成，检测 iframe...")
+
+            # 5. 检测 iframe 并选择正确的操作上下文
+            target_frame = page
+
+            # 检查是否配置了多层iframe
+            iframe_levels = 0
+            if isinstance(config.fields_mapping, dict):
+                iframe_levels = config.fields_mapping.get('iframe_levels', 0)
+
+            if iframe_levels >= 2:
+                # 处理多层嵌套iframe（医保局等复杂页面）
+                self.logger.info(f"检测到多层iframe配置，层数: {iframe_levels}")
+                await self._broadcast_log("info", f"处理{iframe_levels}层嵌套iframe...")
+
+                try:
+                    # 获取第1层iframe选择器
+                    iframe1_selector = config.fields_mapping.get('iframe1_selector')
+                    if iframe1_selector:
+                        self.logger.info(f"等待第1层iframe: {iframe1_selector}")
+                        iframe1_element = await page.wait_for_selector(iframe1_selector, timeout=10000)
+                        iframe1 = await iframe1_element.content_frame()
+
+                        if not iframe1:
+                            raise Exception("无法获取第1层iframe")
+
+                        self.logger.info("成功进入第1层iframe")
+                        await self._broadcast_log("info", "进入第1层iframe")
+
+                        # 等待第1层iframe加载
+                        await iframe1.wait_for_load_state("networkidle", timeout=10000)
+                        await asyncio.sleep(2)
+
+                        # 获取第2层iframe选择器
+                        iframe2_selector = config.fields_mapping.get('iframe2_selector')
+                        if iframe2_selector:
+                            self.logger.info(f"等待第2层iframe: {iframe2_selector}")
+                            iframe2_element = await iframe1.wait_for_selector(iframe2_selector, timeout=10000)
+                            iframe2 = await iframe2_element.content_frame()
+
+                            if not iframe2:
+                                raise Exception("无法获取第2层iframe")
+
+                            self.logger.info("成功进入第2层iframe")
+                            await self._broadcast_log("info", "进入第2层iframe")
+
+                            # 等待第2层iframe加载
+                            await iframe2.wait_for_load_state("networkidle", timeout=10000)
+                            await asyncio.sleep(2)
+
+                            target_frame = iframe2
+                            # 在 Frame 上注册控制台监听
+                            target_frame.on("console", handle_console)
+                            await self._broadcast_log("success", "成功定位到目标iframe")
+                        else:
+                            target_frame = iframe1
+                    else:
+                        self.logger.warning("未配置iframe1_selector，将使用自动检测")
+
+                except Exception as e:
+                    self.logger.error(f"多层iframe处理失败: {e}")
+                    await self._broadcast_log("error", f"iframe处理失败: {e}")
+                    raise
+
+            # 如果没有配置多层iframe，使用原有的自动检测逻辑
+            elif target_frame == page:
+                frames = page.frames
+                self.logger.info(f"检测到 {len(frames)} 个 frame")
+                await self._broadcast_log("info", f"检测到 {len(frames)} 个 frame")
+
+                if len(frames) > 1:
+                    # 尝试在每个 frame 中查找可见的输入框
+                    for idx, frame in enumerate(frames):
+                        try:
+                            self.logger.info(f"检查 Frame {idx}: {frame.url}")
+                            # 检查是否有可见输入框
+                            inputs = await frame.query_selector_all('input')
+                            self.logger.info(f"Frame {idx} 找到 {len(inputs)} 个输入框")
+
+                            visible_inputs = []
+                            for inp in inputs:
+                                try:
+                                    if await inp.is_visible():
+                                        visible_inputs.append(inp)
+                                except:
+                                    pass
+
+                            self.logger.info(f"Frame {idx} 有 {len(visible_inputs)} 个可见输入框")
+
+                            if len(visible_inputs) > 0:
+                                self.logger.info(f"选择 Frame {idx} ({frame.url})")
+                                target_frame = frame
+                                # 在 Frame 上也注册控制台监听
+                                target_frame.on("console", handle_console)
+                                await self._broadcast_log("info", f"使用 Frame {idx}: {frame.url}")
+                                break
+                        except Exception as e:
+                            self.logger.warning(f"Frame {idx} 检查失败: {e}")
+                            continue
+
+            if target_frame == page:
+                self.logger.info("使用主页面（未找到合适的 iframe）")
+                await self._broadcast_log("info", "使用主页面")
+
+            # 6. 填充表单
             if config.input_configs:
-                await self._fill_form(page, config.input_configs, job.query_params)
+                # 提取 inputs 列表（兼容新旧格式）
+                inputs = config.input_configs.get('inputs', config.input_configs) if isinstance(config.input_configs, dict) else config.input_configs
+                await self._fill_form(target_frame, inputs, job.query_params)
                 # 节点 3: 表单填充完成
                 await self._broadcast_log("info", "表单填充完成")
 
-            # 6. 点击提交按钮
+            # 7. 点击提交按钮
             self.logger.info(f"点击提交按钮: {config.submit_selector}")
-            await page.click(config.submit_selector, timeout=TIMEOUTS['click'])
+            await target_frame.click(config.submit_selector, timeout=TIMEOUTS['click'])
 
             # 节点 4: 提交按钮点击
             await self._broadcast_log("info", "点击提交按钮")
 
-            # 7. 等待结果加载
+            # 8. 等待结果加载
             self.logger.info(f"等待结果加载: {config.wait_selector}")
-            await page.wait_for_selector(
+            await target_frame.wait_for_selector(
                 config.wait_selector,
                 state="visible",
                 timeout=TIMEOUTS['wait_selector']
             )
-            await asyncio.sleep(1)  # 额外等待确保数据加载完成
+
+            # 额外等待确保数据完全加载（特别是动态渲染的内容）
+            await asyncio.sleep(3)
+
+            # 尝试等待真实的数据行（包含编码的单元格）
+            # 这比等待空表格更可靠
+            try:
+                # 等待至少有 3 个 tbody tr（1个占位行 + 至少2个数据/分页行）
+                await target_frame.wait_for_function("""
+                    () => {
+                        const rows = document.querySelectorAll('table tbody tr');
+                        return rows.length >= 3;
+                    }
+                """, timeout=10000)
+                self.logger.info("表格行数已达到最小值")
+
+                # 再等待出现包含编码的单元格
+                await target_frame.wait_for_function("""
+                    () => {
+                        const cells = document.querySelectorAll('table tbody tr td');
+                        for (const cell of cells) {
+                            const text = cell.innerText || cell.textContent || '';
+                            // 查找包含编码的单元格（通常以 C 开头，长度 > 10）
+                            if (text.trim().length > 10 && /^[A-Z0-9]/.test(text.trim())) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """, timeout=10000)
+                self.logger.info("数据行已完全加载")
+
+                #关键：额外等待确保 DOM 完全稳定并且所有行都已渲染
+                # jqGrid 可能在数据加载后还会重新渲染 DOM
+                await asyncio.sleep(2)
+                self.logger.info("额外等待 2 秒确保 DOM 稳定")
+            except Exception as e:
+                self.logger.warning(f"等待数据行加载超时，继续执行: {e}")
 
             self.logger.info("结果页面加载完成")
 
             # 节点 5: 结果页面加载完成
             await self._broadcast_log("info", "结果页面加载完成")
 
-            # 8. 数据提取（含翻页）
-            if config.pagination_selector and config.max_pages > 1:
-                extracted_data, page_count = await self._extract_with_pagination(
-                    page,
-                    config.fields_mapping,
-                    config.pagination_selector,
-                    config.wait_selector,
-                    config.max_pages,
-                    job_id
-                )
-            else:
-                extracted_data = await self._extract_page_data(page, config.fields_mapping)
-                page_count = 1
+            # 9. 数据提取（含翻页）
+            self.logger.info(f"准备提取数据，target_frame 类型: {type(target_frame).__name__}")
+            if hasattr(target_frame, 'url'):
+                self.logger.info(f"target_frame URL: {target_frame.url}")
+
+            # 数据提取重试机制（针对异步加载的数据）
+            max_retries = 2
+            retry_delay = 3  # 秒
+
+            extracted_data = []
+            page_count = 1
+
+            for attempt in range(max_retries):
+                self.logger.info(f"=== 第 {attempt + 1} 次提取尝试 ===")
+                if config.pagination_selector and config.max_pages > 1:
+                    self.logger.info("使用分页提取")
+                    extracted_data, page_count = await self._extract_with_pagination(
+                        target_frame,
+                        config.fields_mapping,
+                        config.pagination_selector,
+                        config.wait_selector,
+                        config.max_pages,
+                        job_id
+                    )
+                else:
+                    self.logger.info("使用单页提取")
+                    extracted_data = await self._extract_page_data(target_frame, config.fields_mapping)
+                    page_count = 1
+
+                self.logger.info(f"提取方法返回，数据量: {len(extracted_data)}")
+
+                # 如果提取到数据，直接返回
+                if len(extracted_data) > 0:
+                    self.logger.info(f"第 {attempt + 1} 次尝试成功，提取到 {len(extracted_data)} 条数据")
+                    break
+
+                # 如果是最后一次尝试，不再重试
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"第 {attempt + 1} 次尝试未提取到数据，{retry_delay}秒后重试...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    self.logger.warning(f"已尝试 {max_retries} 次，仍未提取到数据")
 
             self.logger.info(f"数据提取完成，共 {page_count} 页，{len(extracted_data)} 条数据")
+
+            # 打印前3条数据用于调试
+            for i, item in enumerate(extracted_data[:3]):
+                self.logger.info(f"数据 {i+1}: {item}")
 
             # 9. 保存结果
             await self._save_result(
@@ -495,7 +826,8 @@ class PlaywrightExecutor:
             job.status = JobStatus.SUCCESS
             await session.commit()
 
-            execution_time = (datetime.now() - start_time).total_seconds()
+            success = True
+            execution_time = time.time() - start_time
             self.logger.info(f"任务 {job_id} 执行成功，耗时 {execution_time:.2f} 秒")
 
             # 节点 8: 任务成功完成
@@ -549,6 +881,34 @@ class PlaywrightExecutor:
             }
 
         finally:
+            # 记录执行时间
+            execution_time = time.time() - start_time
+            await metrics_collector.record(
+                metric_name="job_execution_time",
+                value=execution_time,
+                labels={"job_id": str(job_id)}
+            )
+
+            # 记录成功/失败率
+            if success:
+                await metrics_collector.record(
+                    metric_name="job_success_rate",
+                    value=1.0,
+                    labels={"status": "success"}
+                )
+            else:
+                await metrics_collector.record(
+                    metric_name="job_failure_rate",
+                    value=1.0,
+                    labels={"status": "failed"}
+                )
+
+            self.logger.info(
+                f"任务 {job_id} 执行完成 - "
+                f"状态: {'成功' if success else '失败'}, "
+                f"耗时: {execution_time:.2f}s"
+            )
+
             # Cleanup in reverse order of creation to prevent resource leaks
             if page:
                 await page.close()
