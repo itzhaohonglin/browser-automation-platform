@@ -13,6 +13,7 @@ from app.api.metrics import router as metrics_router
 from app.api.alerts import router as alerts_router
 from app.api.websocket import websocket_manager
 from app.services.scheduler import TaskScheduler
+from app.services.alert_engine import alert_engine
 
 # 配置日志
 logging.basicConfig(
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI):
         scheduler = TaskScheduler(ws_manager=websocket_manager)
         await scheduler.start()
         logger.info("调度器已启动")
+
+        # 将 WebSocket 管理器传递给告警引擎
+        alert_engine.ws_manager = websocket_manager
+        logger.info("告警引擎已配置 WebSocket 管理器")
     except Exception as e:
         logger.error(f"调度器启动失败: {e}", exc_info=True)
         # 清理部分初始化的资源

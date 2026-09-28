@@ -14,10 +14,17 @@ logger = logging.getLogger(__name__)
 class AlertEngine:
     """告警引擎 - 周期性评估告警规则"""
 
-    def __init__(self):
+    def __init__(self, ws_manager=None):
+        """
+        初始化告警引擎
+
+        Args:
+            ws_manager: WebSocket 管理器（可选）
+        """
         self.email_notifier = EmailNotifier()
         self.dingtalk_notifier = DingTalkNotifier()
         self.wecom_notifier = WeComNotifier()
+        self.ws_manager = ws_manager
         self.logger = logger
 
     async def evaluate_rules(self):
@@ -83,6 +90,9 @@ class AlertEngine:
 
             # 发送通知
             await self._send_notifications(rule, alert, latest_metric, session)
+
+            # 广播告警到 WebSocket
+            await self._broadcast_alert(rule, alert, latest_metric)
 
     async def _query_metrics(
         self,
@@ -196,6 +206,44 @@ class AlertEngine:
             alert.notify_error = f"{len(results)} 个渠道全部失败"
 
         await session.commit()
+
+    async def _broadcast_alert(
+        self,
+        rule: AlertRule,
+        alert: AlertHistory,
+        metric: MetricsTimeSeries
+    ):
+        """
+        通过 WebSocket 广播告警
+
+        Args:
+            rule: 告警规则
+            alert: 告警历史记录
+            metric: 触发告警的指标数据
+        """
+        if not self.ws_manager:
+            return
+
+        try:
+            message = {
+                "type": "alert",
+                "alert_id": alert.id,
+                "rule_id": rule.id,
+                "rule_name": rule.rule_name,
+                "metric_name": rule.metric_name,
+                "metric_value": metric.metric_value,
+                "threshold": rule.threshold,
+                "condition": rule.condition,
+                "message": alert.alert_message,
+                "triggered_at": alert.triggered_at.isoformat(),
+                "severity": "warning"  # 可以根据规则配置
+            }
+
+            await self.ws_manager.broadcast(message)
+            self.logger.info(f"告警 #{alert.id} 已通过 WebSocket 广播")
+
+        except Exception as e:
+            self.logger.error(f"WebSocket 广播告警失败: {e}", exc_info=True)
 
 
 # 全局实例
