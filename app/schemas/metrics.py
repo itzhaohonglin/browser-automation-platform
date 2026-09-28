@@ -22,4 +22,4 @@ class DashboardData(BaseModel):
     job_success_rate: float
     avg_execution_time: float
     browser_pool_utilization: float
-    queue_size: float
+    queue_size: int
