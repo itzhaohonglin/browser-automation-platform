@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,9 @@ from app.schemas.alerts import (
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 logger = logging.getLogger(__name__)
 
+# 常量定义
+VALID_CHANNELS = {"email", "dingtalk", "wecom"}
+
 
 @router.post("/rules", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
 async def create_alert_rule(
@@ -25,8 +28,7 @@ async def create_alert_rule(
     """创建告警规则"""
     try:
         # 验证通知渠道
-        valid_channels = {"email", "dingtalk", "wecom"}
-        invalid_channels = set(rule.channels) - valid_channels
+        invalid_channels = set(rule.channels) - VALID_CHANNELS
         if invalid_channels:
             raise HTTPException(
                 status_code=400,
@@ -62,6 +64,8 @@ async def create_alert_rule(
 @router.get("/rules", response_model=List[AlertRuleResponse])
 async def list_alert_rules(
     enabled: bool = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_session)
 ) -> List[AlertRuleResponse]:
     """列出所有告警规则"""
@@ -72,6 +76,10 @@ async def list_alert_rules(
             stmt = stmt.where(AlertRule.enabled == enabled)
 
         stmt = stmt.order_by(AlertRule.created_at.desc())
+
+        # 添加分页
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size)
 
         result = await session.execute(stmt)
         rules = result.scalars().all()
@@ -119,8 +127,7 @@ async def update_alert_rule(
 
         # 验证通知渠道
         if rule_update.channels:
-            valid_channels = {"email", "dingtalk", "wecom"}
-            invalid_channels = set(rule_update.channels) - valid_channels
+            invalid_channels = set(rule_update.channels) - VALID_CHANNELS
             if invalid_channels:
                 raise HTTPException(
                     status_code=400,
@@ -174,7 +181,7 @@ async def delete_alert_rule(
 @router.get("/history", response_model=List[AlertHistoryResponse])
 async def get_alert_history(
     rule_id: int = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
     session: AsyncSession = Depends(get_session)
 ) -> List[AlertHistoryResponse]:
     """获取告警历史"""
