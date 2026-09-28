@@ -106,6 +106,7 @@ class AlertHistory(Base):
     # 告警信息
     triggered_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="触发时间")
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, comment="恢复时间")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="告警是否仍然活跃")
     alert_message: Mapped[str] = mapped_column(Text, nullable=False, comment="告警消息")
     metric_value: Mapped[float] = mapped_column(Float, nullable=False, comment="触发时指标值")
 

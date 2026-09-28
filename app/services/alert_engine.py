@@ -124,6 +124,31 @@ class AlertEngine:
 
             # 广播告警到 WebSocket
             await self._broadcast_alert(rule, alert, latest_metric)
+        else:
+            # 新增：检查是否需要发送恢复通知
+            # 查询该规则最近的活跃告警
+            stmt = select(AlertHistory).where(
+                AlertHistory.rule_id == rule.id,
+                AlertHistory.is_active == True
+            ).order_by(AlertHistory.triggered_at.desc()).limit(1)
+
+            result = await session.execute(stmt)
+            active_alert = result.scalar_one_or_none()
+
+            if active_alert and self._should_send_recovery(rule, active_alert, latest_metric.metric_value):
+                self.logger.info(
+                    f"规则 {rule.rule_name} 指标已恢复: "
+                    f"{rule.metric_name}={latest_metric.metric_value} "
+                    f"不再满足 {rule.condition} {rule.threshold}"
+                )
+
+                # 发送恢复通知
+                await self._send_recovery_notification(rule, active_alert, latest_metric.metric_value)
+
+                # 标记告警为已恢复
+                active_alert.is_active = False
+                active_alert.resolved_at = datetime.now(timezone.utc)
+                await session.commit()
 
     async def _query_metrics(
         self,
@@ -166,6 +191,90 @@ class AlertEngine:
         else:
             self.logger.error(f"不支持的条件运算符: {condition}")
             return False
+
+    def _should_send_recovery(
+        self,
+        rule: AlertRule,
+        alert: AlertHistory,
+        current_value: float
+    ) -> bool:
+        """
+        检查是否应该发送恢复通知
+
+        Args:
+            rule: 告警规则
+            alert: 活跃的告警历史
+            current_value: 当前指标值
+
+        Returns:
+            bool: True 表示应该发送恢复通知
+        """
+        if not alert or not alert.is_active:
+            return False
+
+        # 检查当前值是否不再满足告警条件
+        still_triggered = self._check_should_trigger(
+            current_value,
+            rule.condition,
+            rule.threshold
+        )
+
+        return not still_triggered
+
+    async def _send_recovery_notification(
+        self,
+        rule: AlertRule,
+        alert: AlertHistory,
+        current_value: float
+    ):
+        """
+        发送恢复通知
+
+        Args:
+            rule: 告警规则
+            alert: 告警历史记录
+            current_value: 当前指标值
+        """
+        recovery_message = (
+            f"✅ 告警恢复通知\n"
+            f"规则名称: {rule.rule_name}\n"
+            f"指标名称: {rule.metric_name}\n"
+            f"当前值: {current_value}\n"
+            f"阈值: {rule.threshold}\n"
+            f"恢复时间: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        # 发送到所有配置的渠道
+        for channel in rule.channels:
+            try:
+                if channel == "email":
+                    await self.email_notifier.send(recovery_message)
+                elif channel == "dingtalk":
+                    await self.dingtalk_notifier.send(recovery_message)
+                elif channel == "wecom":
+                    await self.wecom_notifier.send(recovery_message)
+
+                self.logger.info(f"恢复通知已发送到 {channel}")
+
+            except Exception as e:
+                self.logger.error(f"发送 {channel} 恢复通知失败: {e}", exc_info=True)
+
+        # WebSocket 广播恢复通知
+        if self.ws_manager:
+            try:
+                message = {
+                    "type": "alert_recovery",
+                    "alert_id": alert.id,
+                    "rule_id": rule.id,
+                    "rule_name": rule.rule_name,
+                    "metric_name": rule.metric_name,
+                    "current_value": current_value,
+                    "threshold": rule.threshold,
+                    "recovered_at": datetime.now(timezone.utc).isoformat()
+                }
+                await self.ws_manager.broadcast(message)
+            except Exception as e:
+                self.logger.error(f"WebSocket 广播恢复通知失败: {e}", exc_info=True)
 
     async def _create_alert(
         self,
