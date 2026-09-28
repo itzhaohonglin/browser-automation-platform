@@ -43,6 +43,12 @@ class JobQueue(Base):
         comment="任务状态"
     )
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="重试次数")
+    priority: Mapped[int] = mapped_column(
+        Integer,
+        default=5,
+        nullable=False,
+        comment="任务优先级 1-10"
+    )
     error_msg: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="错误信息")
 
     # 时间戳
