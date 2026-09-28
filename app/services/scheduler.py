@@ -8,18 +8,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
 from app.models.job import JobQueue, JobStatus
+from app.services.alert_engine import alert_engine
 
 logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
-    """任务调度器 - 负责定时补跑失败任务"""
+    """任务调度器 - 负责定时补跑失败任务和评估告警规则"""
 
     # 调度配置常量
-    RETRY_INTERVAL_MINUTES = 30  # 重试间隔（分钟）
+    RETRY_INTERVAL_MINUTES = 1  # 重试间隔（分钟）
     FIRST_RUN_DELAY_MINUTES = 1  # 首次运行延迟（分钟）
     MAX_RETRY_COUNT = 3  # 最大重试次数
     BATCH_SIZE = 100  # 每批处理的任务数量
+
+    # 告警评估配置
+    ALERT_EVAL_INTERVAL_MINUTES = 5  # 告警评估间隔（分钟）
+    ALERT_FIRST_RUN_DELAY_MINUTES = 2  # 告警首次运行延迟（分钟）
 
     def __init__(self, ws_manager=None):
         """
@@ -42,13 +47,22 @@ class TaskScheduler:
         """启动调度器"""
         self.logger.info("正在启动任务调度器...")
 
-        # 添加定时任务：每 30 分钟扫描并重试失败任务
+        # 添加定时任务：重试失败任务
         self.scheduler.add_job(
             func=self.retry_failed_jobs,
             trigger=IntervalTrigger(minutes=self.RETRY_INTERVAL_MINUTES),
             id='retry_failed_jobs',
             name='重试失败任务',
-            next_run_time=datetime.now() + timedelta(minutes=self.FIRST_RUN_DELAY_MINUTES)  # 首次执行延迟
+            next_run_time=datetime.now() + timedelta(minutes=self.FIRST_RUN_DELAY_MINUTES)
+        )
+
+        # 添加定时任务：评估告警规则
+        self.scheduler.add_job(
+            func=self.evaluate_alerts,
+            trigger=IntervalTrigger(minutes=self.ALERT_EVAL_INTERVAL_MINUTES),
+            id='evaluate_alerts',
+            name='评估告警规则',
+            next_run_time=datetime.now() + timedelta(minutes=self.ALERT_FIRST_RUN_DELAY_MINUTES)
         )
 
         self.scheduler.start()
@@ -112,6 +126,21 @@ class TaskScheduler:
 
         except Exception as e:
             self.logger.error(f"扫描失败任务时出错: {e}", exc_info=True)
+
+    async def evaluate_alerts(self):
+        """
+        评估告警规则
+
+        定期调用告警引擎评估所有启用的告警规则。
+        """
+        self.logger.info("开始评估告警规则...")
+
+        try:
+            await alert_engine.evaluate_rules()
+            self.logger.info("告警规则评估完成")
+
+        except Exception as e:
+            self.logger.error(f"告警规则评估失败: {e}", exc_info=True)
 
     async def shutdown(self):
         """优雅停止调度器"""
