@@ -14,7 +14,7 @@ def client():
 def test_query_metrics(client):
     """测试：查询指标数据"""
     response = client.get(
-        "/api/metrics/query",
+        "/api/metrics/",
         params={
             "metric_name": "job_success_rate",
             "start_time": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
@@ -23,9 +23,12 @@ def test_query_metrics(client):
     )
     assert response.status_code == 200
     data = response.json()
-    assert "metric_name" in data
-    assert "data_points" in data
-    assert isinstance(data["data_points"], list)
+    assert isinstance(data, list)
+    # 验证列表中的每个元素包含 timestamp, value, labels 字段
+    for item in data:
+        assert "timestamp" in item
+        assert "value" in item
+        assert "labels" in item or item.get("labels") is None
 
 
 def test_get_dashboard_stats(client):
@@ -33,6 +36,13 @@ def test_get_dashboard_stats(client):
     response = client.get("/api/metrics/dashboard")
     assert response.status_code == 200
     data = response.json()
-    assert "total_jobs" in data
-    assert "success_rate" in data
+    # 验证 DashboardData 模型字段
+    assert "job_success_rate" in data
     assert "avg_execution_time" in data
+    assert "browser_pool_utilization" in data
+    assert "queue_size" in data
+    # 验证字段类型
+    assert isinstance(data["job_success_rate"], (int, float))
+    assert isinstance(data["avg_execution_time"], (int, float))
+    assert isinstance(data["browser_pool_utilization"], (int, float))
+    assert isinstance(data["queue_size"], (int, float))
