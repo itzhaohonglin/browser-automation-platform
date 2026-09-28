@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.api.endpoints import router
 from app.api.config_endpoints import router as config_router
 from app.api.metrics import router as metrics_router
+from app.api.alerts import router as alerts_router
 from app.api.websocket import websocket_manager
 from app.services.scheduler import TaskScheduler
 
@@ -86,6 +87,7 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(config_router)
 app.include_router(metrics_router)
+app.include_router(alerts_router)
 
 # 注册 WebSocket 路由
 @app.websocket("/ws")
