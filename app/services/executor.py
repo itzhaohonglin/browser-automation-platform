@@ -528,7 +528,7 @@ class PlaywrightExecutor:
         Returns:
             执行结果字典
         """
-        start_time = time.time()
+        start_time = None  # Initialize to None to prevent NameError in finally
         success = False
         browser = None
         context = None
@@ -537,6 +537,8 @@ class PlaywrightExecutor:
         job = None  # Initialize to prevent NameError in exception handler
 
         try:
+            start_time = time.time()
+
             # 1. 查询任务和配置
             stmt = select(JobQueue).where(JobQueue.id == job_id)
             result = await session.execute(stmt)
@@ -881,34 +883,40 @@ class PlaywrightExecutor:
             }
 
         finally:
-            # 记录执行时间
-            execution_time = time.time() - start_time
-            await metrics_collector.record(
-                metric_name="job_execution_time",
-                value=execution_time,
-                labels={"job_id": str(job_id)}
-            )
+            # 记录指标（不能影响资源清理）
+            try:
+                if start_time is not None:  # 确保 start_time 已初始化
+                    execution_time = time.time() - start_time
 
-            # 记录成功/失败率
-            if success:
-                await metrics_collector.record(
-                    metric_name="job_success_rate",
-                    value=1.0,
-                    labels={"status": "success"}
-                )
-            else:
-                await metrics_collector.record(
-                    metric_name="job_failure_rate",
-                    value=1.0,
-                    labels={"status": "failed"}
-                )
+                    await metrics_collector.record(
+                        metric_name="job_execution_time",
+                        value=execution_time,
+                        labels={"job_id": str(job_id)}
+                    )
 
-            self.logger.info(
-                f"任务 {job_id} 执行完成 - "
-                f"状态: {'成功' if success else '失败'}, "
-                f"耗时: {execution_time:.2f}s"
-            )
+                    # 记录成功/失败率
+                    if success:
+                        await metrics_collector.record(
+                            metric_name="job_success_rate",
+                            value=1.0,
+                            labels={"status": "success"}
+                        )
+                    else:
+                        await metrics_collector.record(
+                            metric_name="job_failure_rate",
+                            value=1.0,
+                            labels={"status": "failed"}
+                        )
 
+                    self.logger.info(
+                        f"任务 {job_id} 执行完成 - "
+                        f"状态: {'成功' if success else '失败'}, "
+                        f"耗时: {execution_time:.2f}s"
+                    )
+            except Exception as e:
+                self.logger.error(f"指标记录失败: {e}", exc_info=True)
+
+            # 资源清理（必须执行）
             # Cleanup in reverse order of creation to prevent resource leaks
             if page:
                 await page.close()
