@@ -34,6 +34,28 @@ class CrawlerConfig(Base):
     pagination_selector: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="下一页按钮选择器")
     max_pages: Mapped[int] = mapped_column(Integer, default=1, nullable=False, comment="最大翻页数")
 
+    # 超时配置（新增）
+    timeout_config: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="超时配置 {page_load: 30000, wait_selector: 15000, ...}"
+    )
+
+    # 提取规则配置（新增）
+    extraction_config: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="提取规则 {filters: [...], wait_times: {...}, retry: {...}}"
+    )
+
+    # 优先级（新增）
+    priority: Mapped[int] = mapped_column(
+        Integer,
+        default=5,
+        nullable=False,
+        comment="任务优先级 1-10，数字越大优先级越高"
+    )
+
     # 状态字段
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, comment="是否启用")
     created_at: Mapped[datetime] = mapped_column(
