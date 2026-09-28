@@ -132,3 +132,7 @@ docs/.doctrees/
 dmypy.json
 .pyre/
 .pytype/
+
+# Temporary test scripts
+/*.py
+!setup.py
