@@ -3,6 +3,7 @@ from app.models.base import Base
 from app.models.config import CrawlerConfig
 from app.models.job import JobQueue, JobStatus
 from app.models.result import CrawlerResult
+from app.models.metrics import MetricsTimeSeries, AlertRule, AlertHistory
 
 __all__ = [
     "Base",
@@ -10,4 +11,7 @@ __all__ = [
     "JobQueue",
     "JobStatus",
     "CrawlerResult",
+    "MetricsTimeSeries",
+    "AlertRule",
+    "AlertHistory",
 ]
