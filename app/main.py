@@ -8,6 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.endpoints import router
+from app.api.config_endpoints import router as config_router
+from app.api.metrics import router as metrics_router
 from app.api.websocket import websocket_manager
 from app.services.scheduler import TaskScheduler
 
@@ -19,7 +21,8 @@ logging.basicConfig(
 
 # Windows 平台 Playwright 兼容性设置
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    # 使用 WindowsSelectorEventLoopPolicy 以支持子进程（Playwright 需要）
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # 全局调度器实例
 scheduler: Optional[TaskScheduler] = None
@@ -81,6 +84,8 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(router)
+app.include_router(config_router)
+app.include_router(metrics_router)
 
 # 注册 WebSocket 路由
 @app.websocket("/ws")
@@ -110,6 +115,11 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
+    # 确保 Windows 使用正确的事件循环策略
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     uvicorn.run(
         "app.main:app",
         host=settings.APP_HOST,
