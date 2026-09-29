@@ -142,3 +142,213 @@ function updateCloseSelectorVisibility() {
     // 只有选择 "click" 或 "auto" 时才显示关闭选择器输入框
     closeSelectorGroup.style.display = (closeMethod === 'click' || closeMethod === 'auto') ? 'block' : 'none';
 }
+
+/**
+ * 加载配置数据
+ */
+async function loadConfig() {
+    try {
+        const response = await fetch(`/api/configs/${state.configId}`);
+
+        if (!response.ok) {
+            throw new Error(`加载配置失败: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const config = result.data;
+
+        // 填充列表容器选择器
+        document.getElementById('list-selector').value = config.fields_mapping?.list_selector || '';
+
+        // 填充列表字段
+        const listFields = config.fields_mapping?.fields || [];
+        listFields.forEach(field => {
+            addListField(field.name, field.selector, field.attr);
+        });
+
+        // 如果没有字段，添加一个空行
+        if (listFields.length === 0) {
+            addListField();
+        }
+
+        // 填充详情配置
+        const detailConfig = config.fields_mapping?.detail_config;
+        if (detailConfig && detailConfig.enabled) {
+            document.getElementById('enable-detail').checked = true;
+            document.getElementById('detail-config-panel').style.display = 'block';
+
+            document.getElementById('detail-button-selector').value = detailConfig.detail_button_selector || '';
+            document.getElementById('detail-wait-selector').value = detailConfig.wait_selector || '';
+            document.getElementById('detail-iframe-selector').value = detailConfig.detail_iframe_selector || '';
+
+            // 填充详情字段
+            const detailFields = detailConfig.fields || [];
+            detailFields.forEach(field => {
+                addDetailField(field.name, field.selector, field.attr);
+            });
+
+            if (detailFields.length === 0) {
+                addDetailField();
+            }
+
+            // 填充高级配置
+            const closeMethod = detailConfig.close_method || 'auto';
+            document.querySelector(`input[name="close-method"][value="${closeMethod}"]`).checked = true;
+            document.getElementById('close-selector').value = detailConfig.close_selector || '';
+
+            if (detailConfig.retry) {
+                document.getElementById('max-attempts').value = detailConfig.retry.max_attempts || 3;
+                document.getElementById('retry-delay').value = detailConfig.retry.delay_seconds || 2;
+            }
+
+            updateCloseSelectorVisibility();
+        } else {
+            // 默认添加一个空字段行
+            addDetailField();
+        }
+
+    } catch (error) {
+        console.error('加载配置失败:', error);
+        alert(`加载配置失败: ${error.message}`);
+    }
+}
+
+/**
+ * 收集表单数据
+ */
+function collectFormData() {
+    // 收集列表字段
+    const listFields = [];
+    const listFieldRows = document.querySelectorAll('#list-fields-container .field-row');
+
+    listFieldRows.forEach(row => {
+        const name = row.querySelector('.field-name').value.trim();
+        const selector = row.querySelector('.field-selector').value.trim();
+        const attr = row.querySelector('.field-attr').value;
+
+        if (name && selector) {
+            listFields.push({ name, selector, attr });
+        }
+    });
+
+    // 收集详情字段
+    const detailFields = [];
+    const detailFieldRows = document.querySelectorAll('#detail-fields-container .field-row');
+
+    detailFieldRows.forEach(row => {
+        const name = row.querySelector('.field-name').value.trim();
+        const selector = row.querySelector('.field-selector').value.trim();
+        const attr = row.querySelector('.field-attr').value;
+
+        if (name && selector) {
+            detailFields.push({ name, selector, attr });
+        }
+    });
+
+    // 构建配置对象
+    const listSelector = document.getElementById('list-selector').value.trim();
+    const enableDetail = document.getElementById('enable-detail').checked;
+
+    const fieldsMapping = {
+        list_selector: listSelector,
+        fields: listFields
+    };
+
+    if (enableDetail) {
+        const closeMethod = document.querySelector('input[name="close-method"]:checked').value;
+
+        fieldsMapping.detail_config = {
+            enabled: true,
+            detail_button_selector: document.getElementById('detail-button-selector').value.trim(),
+            wait_selector: document.getElementById('detail-wait-selector').value.trim(),
+            detail_iframe_selector: document.getElementById('detail-iframe-selector').value.trim() || null,
+            fields: detailFields,
+            close_method: closeMethod,
+            close_selector: document.getElementById('close-selector').value.trim() || null,
+            timeout: {
+                click: 10000,
+                wait_selector: 5000,
+                iframe_load: 10000,
+                close: 5000
+            },
+            retry: {
+                max_attempts: parseInt(document.getElementById('max-attempts').value) || 3,
+                delay_seconds: parseInt(document.getElementById('retry-delay').value) || 2
+            }
+        };
+    } else {
+        fieldsMapping.detail_config = {
+            enabled: false
+        };
+    }
+
+    return fieldsMapping;
+}
+
+/**
+ * 验证表单数据
+ */
+function validateFormData(fieldsMapping) {
+    const errors = [];
+
+    // 验证列表容器选择器
+    if (!fieldsMapping.list_selector) {
+        errors.push('列表容器选择器不能为空');
+        showFieldError('list-selector', '请输入列表容器选择器');
+    }
+
+    // 验证列表字段
+    if (fieldsMapping.fields.length === 0) {
+        errors.push('至少需要配置一个列表字段');
+    }
+
+    // 验证详情配置
+    if (fieldsMapping.detail_config && fieldsMapping.detail_config.enabled) {
+        if (!fieldsMapping.detail_config.detail_button_selector) {
+            errors.push('详情按钮选择器不能为空');
+            showFieldError('detail-button-selector', '请输入详情按钮选择器');
+        }
+
+        if (!fieldsMapping.detail_config.wait_selector) {
+            errors.push('详情等待选择器不能为空');
+            showFieldError('detail-wait-selector', '请输入详情等待选择器');
+        }
+
+        if (fieldsMapping.detail_config.fields.length === 0) {
+            errors.push('至少需要配置一个详情字段');
+        }
+    }
+
+    return errors;
+}
+
+/**
+ * 显示字段错误
+ */
+function showFieldError(fieldId, message) {
+    const field = document.getElementById(fieldId);
+    const errorElement = document.getElementById(`${fieldId}-error`);
+
+    if (field) {
+        field.classList.add('error');
+    }
+
+    if (errorElement) {
+        errorElement.textContent = message;
+        errorElement.classList.add('show');
+    }
+}
+
+/**
+ * 清除所有字段错误
+ */
+function clearFieldErrors() {
+    document.querySelectorAll('.form-control.error').forEach(el => {
+        el.classList.remove('error');
+    });
+
+    document.querySelectorAll('.error-message.show').forEach(el => {
+        el.classList.remove('show');
+        el.textContent = '';
+    });
+}
