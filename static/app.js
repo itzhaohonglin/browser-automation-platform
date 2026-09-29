@@ -551,6 +551,22 @@ class DashboardApp {
             }
         });
 
+        // 事件委托处理配置操作按钮
+        this.configListContainer.addEventListener('click', (e) => {
+            const button = e.target.closest('.btn-icon');
+            if (!button) return;
+
+            const action = button.dataset.action;
+            const configId = parseInt(button.dataset.id);
+
+            if (action === 'edit') {
+                this.editConfig(configId);
+            } else if (action === 'delete') {
+                const configName = button.dataset.name;
+                this.deleteConfig(configId, configName);
+            }
+        });
+
         // 表单提交
         this.configForm.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -663,8 +679,8 @@ class DashboardApp {
                         ${config.need_login ? '<span class="config-badge badge-login">需登录</span>' : ''}
                     </div>
                     <div class="config-actions">
-                        <button class="btn-icon" onclick="app.editConfig(${config.id})" title="编辑">✏️</button>
-                        <button class="btn-icon" onclick="app.deleteConfig(${config.id}, '${this.escapeHtml(config.config_name)}')" title="删除">🗑️</button>
+                        <button class="btn-icon" data-action="edit" data-id="${config.id}" title="编辑">✏️</button>
+                        <button class="btn-icon" data-action="delete" data-id="${config.id}" data-name="${this.escapeHtml(config.config_name)}" title="删除">🗑️</button>
                     </div>
                 </div>
                 <div class="config-body">
