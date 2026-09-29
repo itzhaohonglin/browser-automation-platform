@@ -3,6 +3,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
+from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,7 @@ from app.api.endpoints import router
 from app.api.config_endpoints import router as config_router
 from app.api.metrics import router as metrics_router
 from app.api.alerts import router as alerts_router
+from app.api.config_test import router as config_test_router
 from app.api.websocket import websocket_manager
 from app.services.scheduler import TaskScheduler
 from app.services.alert_engine import alert_engine
@@ -88,19 +90,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 挂载静态文件目录（必须在路由之前）
+static_dir = Path(__file__).parent.parent / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
 # 注册路由
 app.include_router(router)
 app.include_router(config_router)
 app.include_router(metrics_router)
 app.include_router(alerts_router)
+app.include_router(config_test_router)
 
 # 注册 WebSocket 路由
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket_manager.websocket_endpoint(websocket)
-
-# 挂载静态文件目录
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
