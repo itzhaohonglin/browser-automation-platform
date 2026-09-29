@@ -352,3 +352,234 @@ function clearFieldErrors() {
         el.textContent = '';
     });
 }
+
+/**
+ * 测试配置
+ */
+async function testConfig() {
+    // 清除之前的错误
+    clearFieldErrors();
+
+    // 收集表单数据
+    const fieldsMapping = collectFormData();
+
+    // 验证表单数据
+    const errors = validateFormData(fieldsMapping);
+    if (errors.length > 0) {
+        alert('表单验证失败:\n' + errors.join('\n'));
+        return;
+    }
+
+    // 获取查询参数（从配置中获取第一个输入框的值）
+    const queryParams = {};
+    try {
+        const configResponse = await fetch(`/api/configs/${state.configId}`);
+        const configResult = await configResponse.json();
+        const inputConfigs = configResult.data.input_configs?.inputs || [];
+
+        if (inputConfigs.length > 0) {
+            const firstInput = inputConfigs[0];
+            const paramKey = firstInput.param_key || 'keyword';
+            queryParams[paramKey] = prompt(`请输入测试用的 ${paramKey}:`, '滇械注准20192140008') || '';
+        }
+    } catch (error) {
+        console.error('获取查询参数失败:', error);
+    }
+
+    // 禁用测试按钮
+    const testButton = document.getElementById('test-config');
+    testButton.disabled = true;
+    testButton.innerHTML = '<span class="loading"></span> 测试中...';
+
+    // 显示测试结果面板
+    const resultPanel = document.getElementById('test-result-panel');
+    const resultContent = document.getElementById('test-result-content');
+    resultPanel.style.display = 'block';
+    resultContent.innerHTML = '<p>正在执行测试采集，请稍候...</p>';
+
+    try {
+        const response = await fetch(`/api/configs/${state.configId}/test`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fields_mapping: fieldsMapping,
+                query_params: queryParams
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            displayTestSuccess(result.data);
+        } else {
+            displayTestError(result.error, result.error_type);
+        }
+
+    } catch (error) {
+        displayTestError(error.message, 'network_error');
+    } finally {
+        // 恢复测试按钮
+        testButton.disabled = false;
+        testButton.textContent = '测试配置';
+    }
+}
+
+/**
+ * 显示测试成功结果
+ */
+function displayTestSuccess(data) {
+    const resultContent = document.getElementById('test-result-content');
+
+    let html = `
+        <div class="test-status success">
+            ✓ 成功提取 ${data.total_tested} 条数据
+            （详情成功 ${data.success_count} 条，失败 ${data.failed_count} 条，跳过 ${data.skipped_count} 条）
+        </div>
+    `;
+
+    if (data.sample_items && data.sample_items.length > 0) {
+        html += '<div class="sample-data">';
+
+        data.sample_items.forEach((item, index) => {
+            html += `
+                <div class="sample-item">
+                    <h4>样本数据（第 ${index + 1} 条）</h4>
+
+                    <div class="data-section">
+                        <strong>列表数据：</strong>
+                        ${renderDataFields(item.list_data)}
+                    </div>
+
+                    <div class="data-section">
+                        <strong>详情数据：</strong>
+                        ${renderDataFields(item.detail_data)}
+                        <div class="data-field">
+                            <span class="data-field-label">详情状态:</span>
+                            <span class="data-field-value">${item.detail_status}</span>
+                        </div>
+                        ${item.detail_error ? `
+                            <div class="data-field">
+                                <span class="data-field-label">错误信息:</span>
+                                <span class="data-field-value" style="color: #f44336;">${item.detail_error}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    resultContent.innerHTML = html;
+}
+
+/**
+ * 渲染数据字段
+ */
+function renderDataFields(data) {
+    if (!data || Object.keys(data).length === 0) {
+        return '<p style="color: #999;">无数据</p>';
+    }
+
+    let html = '';
+    for (const [key, value] of Object.entries(data)) {
+        html += `
+            <div class="data-field">
+                <span class="data-field-label">${key}:</span>
+                <span class="data-field-value">${value}</span>
+            </div>
+        `;
+    }
+    return html;
+}
+
+/**
+ * 显示测试错误
+ */
+function displayTestError(error, errorType) {
+    const resultContent = document.getElementById('test-result-content');
+
+    let errorMessage = error;
+    let suggestion = '';
+
+    switch (errorType) {
+        case 'selector_not_found':
+            suggestion = '建议：检查选择器是否正确，或使用浏览器开发者工具验证';
+            break;
+        case 'load_timeout':
+            suggestion = '建议：增加等待时间，或检查网络连接';
+            break;
+        case 'execution_error':
+            suggestion = '建议：检查配置是否完整，或查看服务器日志';
+            break;
+        default:
+            suggestion = '建议：检查配置并重试';
+    }
+
+    resultContent.innerHTML = `
+        <div class="test-status error">
+            ✗ 测试失败
+        </div>
+        <p><strong>错误信息：</strong>${errorMessage}</p>
+        <p><strong>${suggestion}</strong></p>
+    `;
+}
+
+/**
+ * 保存配置
+ */
+async function saveConfig() {
+    // 清除之前的错误
+    clearFieldErrors();
+
+    // 收集表单数据
+    const fieldsMapping = collectFormData();
+
+    // 验证表单数据
+    const errors = validateFormData(fieldsMapping);
+    if (errors.length > 0) {
+        alert('表单验证失败:\n' + errors.join('\n'));
+        return;
+    }
+
+    // 确认保存
+    if (!confirm('确定要保存配置吗？')) {
+        return;
+    }
+
+    // 禁用保存按钮
+    const saveButton = document.getElementById('save-config');
+    saveButton.disabled = true;
+    saveButton.textContent = '保存中...';
+
+    try {
+        const response = await fetch(`/api/configs/${state.configId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fields_mapping: fieldsMapping
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`保存失败: ${response.statusText}`);
+        }
+
+        alert('配置保存成功！');
+
+        // 可选：返回配置列表页
+        // window.location.href = '/static/index.html';
+
+    } catch (error) {
+        alert(`保存配置失败: ${error.message}`);
+    } finally {
+        // 恢复保存按钮
+        saveButton.disabled = false;
+        saveButton.textContent = '保存配置';
+    }
+}
