@@ -5,7 +5,7 @@ import time
 from typing import Optional, Dict, List, Tuple, Literal, Union
 from datetime import datetime
 
-from playwright.async_api import async_playwright, Browser, Page, Frame, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import async_playwright, Browser, Page, Frame, Locator, TimeoutError as PlaywrightTimeoutError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -575,6 +575,143 @@ class PlaywrightExecutor:
             self.logger.warning("未找到任何数据项")
 
         return page_data
+
+    async def _extract_detail_data(
+        self,
+        main_page: Union[Page, Frame],
+        detail_button: Locator,
+        detail_config: Dict,
+        row_index: int
+    ) -> Tuple[Dict, str, Optional[str]]:
+        """
+        提取单条数据的详情
+
+        Args:
+            main_page: 列表页面/Frame
+            detail_button: 详情按钮定位器
+            detail_config: 详情配置
+            row_index: 当前行索引（用于日志）
+
+        Returns:
+            (detail_data, status, error_msg)
+            - detail_data: 提取的详情字典
+            - status: "success"/"failed"
+            - error_msg: 失败时的错误信息
+        """
+        try:
+            # 1. 点击详情按钮
+            self.logger.info(f"[详情] 第 {row_index + 1} 条：点击详情按钮")
+            await detail_button.click(timeout=10000)
+
+            # 2. 等待并切换到详情iframe（如果配置了）
+            detail_frame = main_page
+            detail_iframe_selector = detail_config.get('detail_iframe_selector')
+
+            if detail_iframe_selector:
+                iframe_timeout = detail_config.get('timeout', {}).get('iframe_load', 10000)
+                self.logger.info(f"[详情] 等待详情iframe: {detail_iframe_selector}")
+
+                iframe_element = await main_page.wait_for_selector(
+                    detail_iframe_selector,
+                    timeout=iframe_timeout
+                )
+                detail_frame = await iframe_element.content_frame()
+
+                if not detail_frame:
+                    raise Exception(f"无法获取详情iframe: {detail_iframe_selector}")
+
+                self.logger.info(f"[详情] 成功切换到详情iframe")
+
+            # 3. 等待详情内容加载
+            wait_selector = detail_config['wait_selector']
+            wait_timeout = detail_config.get('timeout', {}).get('wait_selector', 5000)
+
+            self.logger.info(f"[详情] 等待详情内容加载: {wait_selector}")
+            await detail_frame.wait_for_selector(
+                wait_selector,
+                state="visible",
+                timeout=wait_timeout
+            )
+
+            # 额外等待确保数据完全加载
+            await asyncio.sleep(1)
+
+            # 4. 提取详情字段
+            detail_fields = detail_config['fields']
+            self.logger.info(f"[详情] 提取 {len(detail_fields)} 个详情字段")
+
+            # 使用浏览器端JavaScript一次性提取所有字段
+            detail_data = await detail_frame.evaluate("""
+                (fields) => {
+                    const result = {};
+
+                    for (const field of fields) {
+                        const {name, selector, attr} = field;
+                        let value = '';
+
+                        try {
+                            const element = document.querySelector(selector);
+
+                            if (element) {
+                                if (attr === 'text') {
+                                    value = element.innerText || element.textContent || '';
+                                } else if (attr === 'href' || attr === 'src') {
+                                    value = element.getAttribute(attr) || '';
+                                } else {
+                                    value = element.getAttribute(attr) || '';
+                                }
+
+                                value = value.trim();
+                            }
+                        } catch (e) {
+                            console.error(`提取字段 ${name} 失败:`, e);
+                        }
+
+                        result[name] = value;
+                    }
+
+                    return result;
+                }
+            """, detail_fields)
+
+            self.logger.info(f"[详情] 第 {row_index + 1} 条提取完成，字段数: {len(detail_data)}")
+
+            # 5. 关闭详情
+            close_method = detail_config.get('close_method', 'auto')
+            close_selector = detail_config.get('close_selector')
+
+            if close_method == 'click' and close_selector:
+                # 点击关闭按钮
+                self.logger.info(f"[详情] 点击关闭按钮: {close_selector}")
+                await detail_frame.click(close_selector, timeout=5000)
+            elif close_method == 'escape':
+                # 按ESC键
+                self.logger.info(f"[详情] 按ESC键关闭")
+                await detail_frame.keyboard.press('Escape')
+            elif close_method == 'auto':
+                # 自动选择：优先点击，失败则ESC
+                if close_selector:
+                    try:
+                        await detail_frame.click(close_selector, timeout=3000)
+                    except:
+                        self.logger.info(f"[详情] 关闭按钮点击失败，改用ESC键")
+                        await detail_frame.keyboard.press('Escape')
+                else:
+                    await detail_frame.keyboard.press('Escape')
+
+            # 6. 等待返回列表页
+            await asyncio.sleep(0.5)
+
+            return detail_data, "success", None
+
+        except PlaywrightTimeoutError as e:
+            error_msg = f"超时: {str(e)}"
+            self.logger.error(f"[详情] 第 {row_index + 1} 条提取失败: {error_msg}")
+            return {}, "failed", error_msg
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error(f"[详情] 第 {row_index + 1} 条提取失败: {error_msg}")
+            return {}, "failed", error_msg
 
     async def _extract_with_pagination(
         self,
