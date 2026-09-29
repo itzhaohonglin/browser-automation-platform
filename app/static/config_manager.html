@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>配置管理 - 浏览器自动化平台</title>
+    <link rel="stylesheet" href="/static/config_manager.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>采集配置管理</h1>
+            <nav>
+                <a href="/static/index.html">返回首页</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- 配置列表区域 -->
+            <section class="config-list-section">
+                <h2>配置列表</h2>
+                <button id="btn-create-config" class="btn btn-primary">新建配置</button>
+                <table id="config-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>配置名称</th>
+                            <th>目标URL</th>
+                            <th>是否启用</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 动态加载 -->
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- 配置编辑区域 -->
+            <section class="config-edit-section" style="display:none;">
+                <h2 id="form-title">新建配置</h2>
+                <form id="config-form">
+                    <input type="hidden" id="config-id">
+
+                    <!-- 基本信息 -->
+                    <fieldset>
+                        <legend>基本信息</legend>
+                        <label>
+                            配置名称:
+                            <input type="text" id="config-name" required>
+                        </label>
+                        <label>
+                            目标URL:
+                            <input type="url" id="target-url" required>
+                        </label>
+                    </fieldset>
+
+                    <!-- 列表页字段配置 -->
+                    <fieldset>
+                        <legend>列表页字段配置</legend>
+                        <button type="button" id="btn-add-list-field" class="btn btn-secondary">添加字段</button>
+                        <div id="list-fields-container">
+                            <!-- 动态添加字段 -->
+                        </div>
+                    </fieldset>
+
+                    <!-- 详情页配置 -->
+                    <fieldset>
+                        <legend>详情页配置</legend>
+                        <label>
+                            <input type="checkbox" id="detail-enabled">
+                            启用详情采集
+                        </label>
+                        <div id="detail-config-panel" style="display:none;">
+                            <label>
+                                详情按钮选择器:
+                                <input type="text" id="detail-button-selector">
+                            </label>
+                            <label>
+                                等待选择器:
+                                <input type="text" id="detail-wait-selector">
+                            </label>
+                            <button type="button" id="btn-add-detail-field" class="btn btn-secondary">添加详情字段</button>
+                            <div id="detail-fields-container">
+                                <!-- 动态添加字段 -->
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- 操作按钮 -->
+                    <div class="form-actions">
+                        <button type="button" id="btn-test-config" class="btn btn-warning">测试配置</button>
+                        <button type="submit" class="btn btn-primary">保存配置</button>
+                        <button type="button" id="btn-cancel" class="btn btn-secondary">取消</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- 测试结果区域 -->
+            <section class="test-result-section" style="display:none;">
+                <h2>测试结果</h2>
+                <div id="test-stats"></div>
+                <div id="test-samples"></div>
+                <button id="btn-close-test" class="btn btn-secondary">关闭</button>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/config_manager.js"></script>
+</body>
+</html>
