@@ -27,9 +27,11 @@ async def test_config(
     original_max_pages = None
 
     try:
-        # 1. 查询现有配置
+        # 1. 查询现有配置（添加行级锁防止并发修改）
         result = await session.execute(
-            select(CrawlerConfig).where(CrawlerConfig.id == config_id)
+            select(CrawlerConfig)
+            .where(CrawlerConfig.id == config_id)
+            .with_for_update()  # 行级锁，防止并发修改
         )
         config = result.scalar_one_or_none()
 
@@ -135,19 +137,22 @@ async def test_config(
         )
 
     finally:
-        # 清理临时任务
-        if temp_job is not None:
-            await session.delete(temp_job)
+        try:
+            # 清理临时任务
+            if temp_job is not None:
+                await session.delete(temp_job)
 
-        # 确保配置恢复（异常情况）
-        if original_fields_mapping is not None:
-            result = await session.execute(
-                select(CrawlerConfig).where(CrawlerConfig.id == config_id)
-            )
-            config = result.scalar_one_or_none()
-            if config:
+            # 确保配置恢复（使用已加载的 config 对象，避免竞态条件）
+            if original_fields_mapping is not None and config is not None:
+                await session.refresh(config)  # 刷新以获取最新状态
                 config.fields_mapping = original_fields_mapping
                 config.max_pages = original_max_pages
 
-        await session.commit()
-        logger.info("清理完成")
+            await session.commit()
+            logger.info("清理和配置恢复完成")
+        except Exception as cleanup_error:
+            logger.error(f"清理失败: {cleanup_error}", exc_info=True)
+            try:
+                await session.rollback()
+            except Exception as rollback_error:
+                logger.error(f"回滚失败: {rollback_error}", exc_info=True)
