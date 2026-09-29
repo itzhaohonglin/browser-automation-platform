@@ -8,100 +8,164 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>采集配置管理</h1>
-            <nav>
-                <a href="/static/index.html">返回首页</a>
-            </nav>
+        <header class="page-header">
+            <a href="/static/index.html" class="back-btn">← 返回</a>
+            <h1>配置管理</h1>
+            <div class="config-id">配置 ID: <span id="config-id-display">-</span></div>
         </header>
 
-        <main>
-            <!-- 配置列表区域 -->
-            <section class="config-list-section">
-                <h2>配置列表</h2>
-                <button id="btn-create-config" class="btn btn-primary">新建配置</button>
-                <table id="config-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>配置名称</th>
-                            <th>目标URL</th>
-                            <th>是否启用</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- 动态加载 -->
-                    </tbody>
-                </table>
+        <main class="config-form">
+            <!-- 第一步：列表字段配置 -->
+            <section class="form-section">
+                <h2>第一步：配置列表字段</h2>
+
+                <div class="form-group">
+                    <label for="list-selector">
+                        列表容器选择器 <span class="required">*</span>
+                        <span class="help-icon" title="用于定位每一行的 CSS 选择器，例如：table tbody tr">?</span>
+                    </label>
+                    <input type="text"
+                           id="list-selector"
+                           class="form-control"
+                           placeholder="table tbody tr"
+                           required>
+                    <div class="error-message" id="list-selector-error"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>列表字段</label>
+                    <div id="list-fields-container" class="fields-container">
+                        <!-- 动态生成字段行 -->
+                    </div>
+                    <button type="button" class="btn-secondary" id="add-list-field">+ 添加字段</button>
+                </div>
             </section>
 
-            <!-- 配置编辑区域 -->
-            <section class="config-edit-section" style="display:none;">
-                <h2 id="form-title">新建配置</h2>
-                <form id="config-form">
-                    <input type="hidden" id="config-id">
+            <!-- 第二步：详情采集配置 -->
+            <section class="form-section">
+                <h2>第二步：配置详情采集（可选）</h2>
 
-                    <!-- 基本信息 -->
-                    <fieldset>
-                        <legend>基本信息</legend>
-                        <label>
-                            配置名称:
-                            <input type="text" id="config-name" required>
-                        </label>
-                        <label>
-                            目标URL:
-                            <input type="url" id="target-url" required>
-                        </label>
-                    </fieldset>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enable-detail" class="checkbox">
+                        <span>启用详情采集</span>
+                    </label>
+                </div>
 
-                    <!-- 列表页字段配置 -->
-                    <fieldset>
-                        <legend>列表页字段配置</legend>
-                        <button type="button" id="btn-add-list-field" class="btn btn-secondary">添加字段</button>
-                        <div id="list-fields-container">
-                            <!-- 动态添加字段 -->
+                <div id="detail-config-panel" class="detail-panel" style="display: none;">
+                    <div class="form-group">
+                        <label for="detail-button-selector">
+                            详情按钮选择器 <span class="required">*</span>
+                            <span class="help-icon" title="详情按钮的 CSS 选择器（相对于列表行），例如：a.detail-btn">?</span>
+                        </label>
+                        <input type="text"
+                               id="detail-button-selector"
+                               class="form-control"
+                               placeholder="a.detail-btn">
+                        <div class="error-message" id="detail-button-selector-error"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="detail-wait-selector">
+                            详情等待选择器 <span class="required">*</span>
+                            <span class="help-icon" title="详情内容的 CSS 选择器，用于等待详情加载完成，例如：.modal-content">?</span>
+                        </label>
+                        <input type="text"
+                               id="detail-wait-selector"
+                               class="form-control"
+                               placeholder=".modal-content">
+                        <div class="error-message" id="detail-wait-selector-error"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="detail-iframe-selector">
+                            详情 iframe 选择器（可选）
+                            <span class="help-icon" title="如果详情在 iframe 中，填写 iframe 的选择器，例如：#detailIframe">?</span>
+                        </label>
+                        <input type="text"
+                               id="detail-iframe-selector"
+                               class="form-control"
+                               placeholder="#detailIframe">
+                    </div>
+
+                    <div class="form-group">
+                        <label>详情字段</label>
+                        <div id="detail-fields-container" class="fields-container">
+                            <!-- 动态生成详情字段行 -->
                         </div>
-                    </fieldset>
+                        <button type="button" class="btn-secondary" id="add-detail-field">+ 添加详情字段</button>
+                    </div>
 
-                    <!-- 详情页配置 -->
-                    <fieldset>
-                        <legend>详情页配置</legend>
-                        <label>
-                            <input type="checkbox" id="detail-enabled">
-                            启用详情采集
-                        </label>
-                        <div id="detail-config-panel" style="display:none;">
-                            <label>
-                                详情按钮选择器:
-                                <input type="text" id="detail-button-selector">
-                            </label>
-                            <label>
-                                等待选择器:
-                                <input type="text" id="detail-wait-selector">
-                            </label>
-                            <button type="button" id="btn-add-detail-field" class="btn btn-secondary">添加详情字段</button>
-                            <div id="detail-fields-container">
-                                <!-- 动态添加字段 -->
+                    <!-- 高级配置 -->
+                    <details class="advanced-config">
+                        <summary>高级配置</summary>
+
+                        <div class="form-group">
+                            <label>关闭方式</label>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="close-method" value="click">
+                                    <span>点击按钮</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="close-method" value="escape">
+                                    <span>按 ESC 键</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="close-method" value="auto" checked>
+                                    <span>自动选择（推荐）</span>
+                                </label>
                             </div>
                         </div>
-                    </fieldset>
 
-                    <!-- 操作按钮 -->
-                    <div class="form-actions">
-                        <button type="button" id="btn-test-config" class="btn btn-warning">测试配置</button>
-                        <button type="submit" class="btn btn-primary">保存配置</button>
-                        <button type="button" id="btn-cancel" class="btn btn-secondary">取消</button>
-                    </div>
-                </form>
+                        <div class="form-group" id="close-selector-group">
+                            <label for="close-selector">
+                                关闭按钮选择器
+                                <span class="help-icon" title="关闭按钮的 CSS 选择器，例如：.close-btn">?</span>
+                            </label>
+                            <input type="text"
+                                   id="close-selector"
+                                   class="form-control"
+                                   placeholder=".close-btn">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="max-attempts">最大重试次数</label>
+                                <input type="number"
+                                       id="max-attempts"
+                                       class="form-control"
+                                       value="3"
+                                       min="1"
+                                       max="10">
+                            </div>
+                            <div class="form-group">
+                                <label for="retry-delay">重试延迟（秒）</label>
+                                <input type="number"
+                                       id="retry-delay"
+                                       class="form-control"
+                                       value="2"
+                                       min="1"
+                                       max="10">
+                            </div>
+                        </div>
+                    </details>
+                </div>
             </section>
 
-            <!-- 测试结果区域 -->
-            <section class="test-result-section" style="display:none;">
-                <h2>测试结果</h2>
-                <div id="test-stats"></div>
-                <div id="test-samples"></div>
-                <button id="btn-close-test" class="btn btn-secondary">关闭</button>
+            <!-- 第三步：测试与保存 -->
+            <section class="form-section">
+                <h2>第三步：测试与保存</h2>
+
+                <div class="action-buttons">
+                    <button type="button" class="btn-primary" id="test-config">测试配置</button>
+                    <button type="button" class="btn-success" id="save-config">保存配置</button>
+                </div>
+
+                <div id="test-result-panel" class="test-result" style="display: none;">
+                    <h3>测试结果</h3>
+                    <div id="test-result-content"></div>
+                </div>
             </section>
         </main>
     </div>
