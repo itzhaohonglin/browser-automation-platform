@@ -1,12 +1,14 @@
 """
-医保局配置初始化脚本
+国家医保局医用耗材查询配置初始化脚本
 
-创建医保局医用耗材信息采集配置（包含详情采集功能）
+根据 docs/nhsa_medical_config.md 实际网站结构创建配置
 
 使用方法：
 运行：python scripts/init_nhsa_config.py
 
-注意：选择器需要实际测试后调整
+测试查询参数：
+{"medical_code": "C01010100113038"}
+预期结果：2条记录
 """
 
 import asyncio
@@ -22,76 +24,63 @@ from app.models.config import CrawlerConfig
 
 
 async def init_nhsa_config():
-    """初始化医保局配置"""
+    """初始化国家医保局配置"""
 
-    print("开始创建医保局配置...")
+    print("开始创建国家医保局配置...")
 
     config = CrawlerConfig(
-        config_name="医保局-医用耗材信息",
+        config_name="国家医保局-医用耗材信息查询",
         target_url="https://code.nhsa.gov.cn/toSearch.html?sysflag=1004",
         need_login=False,
 
         # 输入配置
-        input_configs={
-            "inputs": [
-                {
-                    "selector": "#registrationNumber",
-                    "param_key": "registration_number",
-                    "input_type": "text"
-                }
-            ]
-        },
+        input_configs=[
+            {
+                "selector": "input[name='specificationCode']",
+                "param_name": "medical_code",
+                "label": "医用耗材代码",
+                "required": True,
+                "iframe_levels": 2,
+                "iframe1_selector": "iframe#dataInfo",
+                "iframe2_selector": "iframe.els-iframe.active"
+            }
+        ],
 
         # 提交和等待
-        submit_selector="#searchBtn",
-        wait_selector="table#jqGrid tbody tr",
+        submit_selector="button:has-text('查询')",
+        wait_selector=".ui-jqgrid-btable",
 
-        # 字段映射（需实际测试后调整）
+        # 字段映射
         fields_mapping={
             "iframe_levels": 2,
-            "iframe1_selector": "#iframe1",
-            "iframe2_selector": "#contentIframe",
-
-            "list_selector": "table#jqGrid tbody tr",
+            "iframe1_selector": "iframe#dataInfo",
+            "iframe2_selector": "iframe.els-iframe.active",
+            "table_selector": ".ui-jqgrid-btable",
+            "row_selector": "tbody tr.jqgrow",
             "fields": [
                 {"name": "序号", "selector": "td:nth-child(1)", "attr": "text"},
-                {"name": "医保编码", "selector": "td:nth-child(2)", "attr": "text"},
-                {"name": "产品名称", "selector": "td:nth-child(3)", "attr": "text"},
-                {"name": "注册证号", "selector": "td:nth-child(4)", "attr": "text"},
-                {"name": "规格", "selector": "td:nth-child(5)", "attr": "text"},
-                {"name": "型号", "selector": "td:nth-child(6)", "attr": "text"}
+                {"name": "医用耗材代码", "selector": "td:nth-child(2)", "attr": "text"},
+                {"name": "一级分类", "selector": "td:nth-child(3)", "attr": "text"},
+                {"name": "二级分类", "selector": "td:nth-child(4)", "attr": "text"},
+                {"name": "三级分类", "selector": "td:nth-child(5)", "attr": "text"},
+                {"name": "标准规格", "selector": "td:nth-child(6)", "attr": "text"},
+                {"name": "型号", "selector": "td:nth-child(7)", "attr": "text"},
+                {"name": "材质特征", "selector": "td:nth-child(8)", "attr": "text"},
+                {"name": "医疗器械分类", "selector": "td:nth-child(9)", "attr": "text"},
+                {"name": "医疗器械代码", "selector": "td:nth-child(10)", "attr": "text"},
+                {"name": "耗材名称", "selector": "td:nth-child(11)", "attr": "text"},
+                {"name": "生产企业", "selector": "td:nth-child(12)", "attr": "text"}
             ],
 
+            # 禁用详情采集（NHSA无详情页）
             "detail_config": {
-                "enabled": True,
-                "detail_button_selector": "a.detail-link",
-                "wait_selector": ".modal-body",
-                "detail_iframe_selector": "#detailIframe",
-                "fields": [
-                    {"name": "注册人名称", "selector": ".registrant-name", "attr": "text"},
-                    {"name": "生产企业名称", "selector": ".manufacturer-name", "attr": "text"},
-                    {"name": "生产地址", "selector": ".address", "attr": "text"},
-                    {"name": "产品标准", "selector": ".standard", "attr": "text"},
-                    {"name": "产品描述", "selector": ".description", "attr": "text"}
-                ],
-                "close_method": "auto",
-                "close_selector": ".close-btn",
-                "timeout": {
-                    "click": 10000,
-                    "wait_selector": 5000,
-                    "iframe_load": 10000,
-                    "close": 5000
-                },
-                "retry": {
-                    "max_attempts": 3,
-                    "delay_seconds": 2
-                }
+                "enabled": False
             }
         },
 
-        # 分页配置
-        pagination_selector="#next_page",
-        max_pages=5,
+        # 分页配置（无分页）
+        pagination_selector=None,
+        max_pages=1,
 
         # 超时配置
         timeout_config={
@@ -107,18 +96,21 @@ async def init_nhsa_config():
         await session.refresh(config)
 
         print("\n" + "="*60)
-        print("✓ 配置创建成功")
+        print("[OK] 配置创建成功")
         print("="*60)
         print(f"配置 ID: {config.id}")
         print(f"配置名称: {config.config_name}")
         print(f"目标 URL: {config.target_url}")
         print(f"详情采集: {'启用' if config.fields_mapping.get('detail_config', {}).get('enabled') else '禁用'}")
+        print(f"字段数量: {len(config.fields_mapping['fields'])} 个")
+        print()
+        print("测试命令:")
+        print(f'curl -X POST http://127.0.0.1:8000/api/jobs -H "Content-Type: application/json" -d \'{{"config_id": {config.id}, "query_params": {{"medical_code": "C01010100113038"}}}}\'')
         print()
         print("下一步:")
-        print(f"1. 访问 http://localhost:8000/static/config_manager.html?id={config.id}")
-        print("2. 根据实际网站结构调整选择器")
-        print("3. 点击「测试配置」验证")
-        print("4. 确认无误后保存配置")
+        print("1. 启动服务: uvicorn app.main:app --reload")
+        print("2. 执行测试查询（预期返回2条记录）")
+        print("3. 查看结果: http://127.0.0.1:8000/static/index.html")
         print("="*60)
 
         return config.id
@@ -128,5 +120,5 @@ if __name__ == "__main__":
     try:
         config_id = asyncio.run(init_nhsa_config())
     except Exception as e:
-        print(f"\n✗ 配置创建失败: {e}")
+        print(f"\n[ERROR] 配置创建失败: {e}")
         sys.exit(1)
