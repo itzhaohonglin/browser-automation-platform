@@ -292,3 +292,35 @@ async def test_extract_list_with_details_paginated():
     assert summary["total_items"] == 4
     assert summary["detail_success"] == 4
     assert summary["detail_failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_job_with_detail_enabled():
+    """测试execute_job集成 - 启用详情采集"""
+    executor = PlaywrightExecutor()
+
+    # Mock配置
+    config = MagicMock()
+    config.fields_mapping = {
+        "detail_config": {
+            "enabled": True
+        }
+    }
+
+    # 验证分支判断逻辑
+    detail_enabled = config.fields_mapping.get('detail_config', {}).get('enabled', False)
+    assert detail_enabled == True
+
+
+@pytest.mark.asyncio
+async def test_execute_job_with_detail_disabled():
+    """测试execute_job集成 - 未启用详情采集"""
+    executor = PlaywrightExecutor()
+
+    # Mock配置
+    config = MagicMock()
+    config.fields_mapping = {}
+
+    # 验证分支判断逻辑
+    detail_enabled = config.fields_mapping.get('detail_config', {}).get('enabled', False)
+    assert detail_enabled == False

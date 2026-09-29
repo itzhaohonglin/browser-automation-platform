@@ -1433,20 +1433,149 @@ class PlaywrightExecutor:
             if hasattr(target_frame, 'url'):
                 self.logger.info(f"target_frame URL: {target_frame.url}")
 
+            # 检查是否启用详情采集
+            detail_enabled = config.fields_mapping.get('detail_config', {}).get('enabled', False)
+
             extracted_data = []
             page_count = 1
 
-            if config.pagination_selector and config.max_pages > 1:
-                self.logger.info("使用分页提取")
+            if detail_enabled:
+                self.logger.info("使用详情采集模式")
 
-                # 翻页提取逻辑
-                current_page = 1
-                page_results = []
-
-                while current_page <= config.max_pages:
-                    self.logger.info(f"提取第 {current_page} 页数据")
+                # 使用详情采集模式
+                if config.pagination_selector and config.max_pages > 1:
+                    self.logger.info("详情采集 + 分页模式")
+                    all_items, page_count, summary = await self._extract_list_with_details_paginated(
+                        target_frame,
+                        config,
+                        job_id
+                    )
+                    extracted_data = {
+                        "items": all_items,
+                        "summary": summary
+                    }
+                else:
+                    self.logger.info("详情采集 + 单页模式")
+                    detail_config = config.fields_mapping.get('detail_config', {})
 
                     # 等待数据稳定
+                    extraction_cfg = self._load_extraction_config(config)
+                    await asyncio.sleep(extraction_cfg["wait_times"]["before_extraction"] / 1000)
+
+                    # 提取列表+详情
+                    items = await self._extract_list_with_details(
+                        target_frame,
+                        config.fields_mapping,
+                        detail_config,
+                        job_id
+                    )
+
+                    # 生成摘要
+                    detail_success = sum(1 for item in items if item["detail_status"] == "success")
+                    detail_failed = sum(1 for item in items if item["detail_status"] == "failed")
+                    detail_skipped = sum(1 for item in items if item["detail_status"] == "skipped")
+
+                    extracted_data = {
+                        "items": items,
+                        "summary": {
+                            "total_items": len(items),
+                            "detail_success": detail_success,
+                            "detail_failed": detail_failed,
+                            "detail_skipped": detail_skipped,
+                            "pages_crawled": 1
+                        }
+                    }
+                    page_count = 1
+            else:
+                self.logger.info("使用标准列表采集模式")
+
+                # 使用原有逻辑（不采集详情）
+                if config.pagination_selector and config.max_pages > 1:
+                    self.logger.info("使用分页提取")
+
+                    # 翻页提取逻辑
+                    current_page = 1
+                    page_results = []
+
+                    while current_page <= config.max_pages:
+                        self.logger.info(f"提取第 {current_page} 页数据")
+
+                        # 等待数据稳定
+                        extraction_cfg = self._load_extraction_config(config)
+                        await asyncio.sleep(extraction_cfg["wait_times"]["before_extraction"] / 1000)
+
+                        # 提取数据（带重试）
+                        page_data = await self._extract_with_retry(
+                            target_frame,
+                            config.fields_mapping,
+                            extraction_cfg["retry"]
+                        )
+
+                        # 应用过滤器
+                        filtered = self._apply_filters(page_data, extraction_cfg["filters"])
+                        page_results.extend(filtered)
+
+                        self.logger.info(f"第 {current_page} 页提取 {len(filtered)} 条数据")
+
+                        # 广播进度
+                        await self._broadcast_progress(
+                            job_id=job_id,
+                            data={
+                                "current_page": current_page,
+                                "total_pages": config.max_pages,
+                                "status": "processing"
+                            }
+                        )
+
+                        # 检查是否需要翻页
+                        if current_page >= config.max_pages:
+                            self.logger.info(f"已达到最大页数 {config.max_pages}")
+                            break
+
+                        # 检查下一页按钮是否存在
+                        next_button = target_frame.locator(config.pagination_selector)
+                        count = await next_button.count()
+
+                        if count == 0:
+                            self.logger.info("下一页按钮不存在，停止翻页")
+                            break
+
+                        # 检查按钮是否可用
+                        is_disabled = await next_button.is_disabled()
+                        if is_disabled:
+                            self.logger.info("下一页按钮已禁用，停止翻页")
+                            break
+
+                        # 点击下一页
+                        self.logger.info("点击下一页按钮")
+                        await next_button.click(timeout=timeouts['click'])
+
+                        if job_id:
+                            await self._broadcast_log("info", f"点击下一页按钮（第 {current_page + 1} 页）")
+
+                        # 等待新页面加载
+                        await target_frame.wait_for_selector(
+                            config.wait_selector,
+                            state="visible",
+                            timeout=timeouts['wait_selector']
+                        )
+
+                        # 页面切换后等待
+                        await asyncio.sleep(extraction_cfg["wait_times"]["after_click"] / 1000)
+
+                        # 页面之间的等待
+                        await asyncio.sleep(extraction_cfg["wait_times"]["between_pages"] / 1000)
+
+                        current_page += 1
+
+                    extracted_data = {"items": page_results}
+                    page_count = current_page
+
+                else:
+                    self.logger.info("使用单页提取")
+
+                    # 等待数据稳定
+                    extraction_cfg = self._load_extraction_config(config)
                     await asyncio.sleep(extraction_cfg["wait_times"]["before_extraction"] / 1000)
 
                     # 提取数据（带重试）
@@ -1457,87 +1586,16 @@ class PlaywrightExecutor:
                     )
 
                     # 应用过滤器
-                    filtered = self._apply_filters(page_data, extraction_cfg["filters"])
-                    page_results.extend(filtered)
+                    filtered_data = self._apply_filters(page_data, extraction_cfg["filters"])
+                    extracted_data = {"items": filtered_data}
+                    page_count = 1
 
-                    self.logger.info(f"第 {current_page} 页提取 {len(filtered)} 条数据")
-
-                    # 广播进度
-                    await self._broadcast_progress(
-                        job_id=job_id,
-                        data={
-                            "current_page": current_page,
-                            "total_pages": config.max_pages,
-                            "status": "processing"
-                        }
-                    )
-
-                    # 检查是否需要翻页
-                    if current_page >= config.max_pages:
-                        self.logger.info(f"已达到最大页数 {config.max_pages}")
-                        break
-
-                    # 检查下一页按钮是否存在
-                    next_button = target_frame.locator(config.pagination_selector)
-                    count = await next_button.count()
-
-                    if count == 0:
-                        self.logger.info("下一页按钮不存在，停止翻页")
-                        break
-
-                    # 检查按钮是否可用
-                    is_disabled = await next_button.is_disabled()
-                    if is_disabled:
-                        self.logger.info("下一页按钮已禁用，停止翻页")
-                        break
-
-                    # 点击下一页
-                    self.logger.info("点击下一页按钮")
-                    await next_button.click(timeout=timeouts['click'])
-
-                    if job_id:
-                        await self._broadcast_log("info", f"点击下一页按钮（第 {current_page + 1} 页）")
-
-                    # 等待新页面加载
-                    await target_frame.wait_for_selector(
-                        config.wait_selector,
-                        state="visible",
-                        timeout=timeouts['wait_selector']
-                    )
-
-                    # 页面切换后等待
-                    await asyncio.sleep(extraction_cfg["wait_times"]["after_click"] / 1000)
-
-                    # 页面之间的等待
-                    await asyncio.sleep(extraction_cfg["wait_times"]["between_pages"] / 1000)
-
-                    current_page += 1
-
-                extracted_data = page_results
-                page_count = current_page
-
-            else:
-                self.logger.info("使用单页提取")
-
-                # 等待数据稳定
-                await asyncio.sleep(extraction_cfg["wait_times"]["before_extraction"] / 1000)
-
-                # 提取数据（带重试）
-                page_data = await self._extract_with_retry(
-                    target_frame,
-                    config.fields_mapping,
-                    extraction_cfg["retry"]
-                )
-
-                # 应用过滤器
-                extracted_data = self._apply_filters(page_data, extraction_cfg["filters"])
-                page_count = 1
-
-            self.logger.info(f"数据提取完成，共 {page_count} 页，{len(extracted_data)} 条数据")
+            self.logger.info(f"数据提取完成，共 {page_count} 页")
 
             # 打印前3条数据用于调试
-            for i, item in enumerate(extracted_data[:3]):
-                self.logger.info(f"数据 {i+1}: {item}")
+            if isinstance(extracted_data.get("items"), list):
+                for i, item in enumerate(extracted_data["items"][:3]):
+                    self.logger.info(f"数据 {i+1}: {item}")
 
             # 9. 保存结果
             await self._save_result(
@@ -1558,25 +1616,26 @@ class PlaywrightExecutor:
             self.logger.info(f"任务 {job_id} 执行成功，耗时 {execution_time:.2f} 秒")
 
             # 节点 8: 任务成功完成
+            items_count = len(extracted_data.get("items", [])) if isinstance(extracted_data, dict) else len(extracted_data)
             await self._broadcast_progress(
                 job_id=job_id,
                 data={
                     "job_id": job_id,
                     "status": "completed",
-                    "extracted_count": len(extracted_data),
+                    "extracted_count": items_count,
                     "pages_crawled": page_count,
                     "execution_time": execution_time
                 }
             )
             await self._broadcast_log(
                 "success",
-                f"任务 {job_id} 执行成功，提取 {len(extracted_data)} 条数据，耗时 {execution_time:.2f} 秒"
+                f"任务 {job_id} 执行成功，提取 {items_count} 条数据，耗时 {execution_time:.2f} 秒"
             )
 
             return {
                 "job_id": job_id,
                 "status": "success",
-                "extracted_count": len(extracted_data),
+                "extracted_count": items_count,
                 "pages_crawled": page_count,
                 "execution_time": execution_time
             }
