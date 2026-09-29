@@ -133,6 +133,9 @@ dmypy.json
 .pyre/
 .pytype/
 
-# Temporary test scripts
+# Temporary test scripts in root
 /*.py
 !setup.py
+
+# But allow scripts directory
+!scripts/

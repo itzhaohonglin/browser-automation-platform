@@ -68,8 +68,8 @@ pytest tests/test_executor_websocket.py
 pytest tests/ -v -s
 
 # 测试登录态管理功能
-bash test_auth.sh  # Linux/Mac
-.\test_auth.ps1    # Windows PowerShell
+bash scripts/test_auth.sh  # Linux/Mac
+.\scripts\test_auth.ps1    # Windows PowerShell
 ```
 
 ### 访问服务
