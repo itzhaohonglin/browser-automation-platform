@@ -144,9 +144,13 @@ async def test_config(
 
             # 确保配置恢复（使用已加载的 config 对象，避免竞态条件）
             if original_fields_mapping is not None and config is not None:
-                await session.refresh(config)  # 刷新以获取最新状态
-                config.fields_mapping = original_fields_mapping
-                config.max_pages = original_max_pages
+                await session.refresh(config)  # 获取最新状态
+
+                # 检查是否已被恢复（幂等性检查）
+                if config.fields_mapping != original_fields_mapping or config.max_pages != original_max_pages:
+                    logger.warning("检测到配置未恢复，在finally块中执行恢复")
+                    config.fields_mapping = original_fields_mapping
+                    config.max_pages = original_max_pages
 
             await session.commit()
             logger.info("清理和配置恢复完成")
