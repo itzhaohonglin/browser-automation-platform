@@ -366,6 +366,23 @@ input[type="radio"] {
     word-break: break-word;
 }
 
+.data-section {
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.data-section:last-child {
+    border-bottom: none;
+}
+
+.data-section strong {
+    display: block;
+    margin-bottom: 8px;
+    color: #666;
+    font-size: 13px;
+}
+
 /* 加载状态 */
 .loading {
     display: inline-block;
