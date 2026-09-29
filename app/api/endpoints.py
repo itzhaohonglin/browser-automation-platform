@@ -212,6 +212,111 @@ async def run_tasks(
     }
 
 
+# ============ 采集结果查询接口 ============
+
+@router.get("/results", tags=["采集结果"])
+async def get_crawler_results(
+    job_id: int = Query(None, description="按任务ID筛选"),
+    config_id: int = Query(None, description="按配置ID筛选"),
+    limit: int = Query(20, description="返回数量", ge=1, le=100),
+    offset: int = Query(0, description="偏移量", ge=0),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    查询采集结果数据
+
+    可以按任务ID或配置ID筛选，支持分页。
+    返回提取的业务数据、查询参数、页数等信息。
+
+    Args:
+        job_id: 任务ID（可选）
+        config_id: 配置ID（可选）
+        limit: 返回数量（1-100）
+        offset: 偏移量
+        db: 数据库 session
+
+    Returns:
+        采集结果列表
+    """
+    from app.models.result import CrawlerResult
+    from sqlalchemy import func
+
+    # 构建查询
+    stmt = select(CrawlerResult).order_by(CrawlerResult.created_at.desc())
+
+    if job_id is not None:
+        stmt = stmt.where(CrawlerResult.job_id == job_id)
+
+    if config_id is not None:
+        stmt = stmt.where(CrawlerResult.config_id == config_id)
+
+    # 查询总数
+    count_stmt = select(func.count(CrawlerResult.id))
+    if job_id is not None:
+        count_stmt = count_stmt.where(CrawlerResult.job_id == job_id)
+    if config_id is not None:
+        count_stmt = count_stmt.where(CrawlerResult.config_id == config_id)
+
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar() or 0
+
+    # 分页查询
+    stmt = stmt.limit(limit).offset(offset)
+    result = await db.execute(stmt)
+    results = result.scalars().all()
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [
+            {
+                "id": r.id,
+                "job_id": r.job_id,
+                "config_id": r.config_id,
+                "query_params": r.query_params,
+                "extracted_data": r.extracted_data,
+                "page_count": r.page_count,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            }
+            for r in results
+        ]
+    }
+
+
+@router.get("/results/{result_id}", tags=["采集结果"])
+async def get_crawler_result_detail(
+    result_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取单个采集结果的详细信息
+
+    Args:
+        result_id: 结果ID
+        db: 数据库 session
+
+    Returns:
+        采集结果详情
+    """
+    from app.models.result import CrawlerResult
+
+    result = await db.get(CrawlerResult, result_id)
+
+    if not result:
+        raise HTTPException(status_code=404, detail="未找到指定的采集结果")
+
+    return {
+        "id": result.id,
+        "job_id": result.job_id,
+        "config_id": result.config_id,
+        "query_params": result.query_params,
+        "extracted_data": result.extracted_data,
+        "page_count": result.page_count,
+        "created_at": result.created_at.isoformat() if result.created_at else None
+    }
+
+
 # ============ 统计数据接口 ============
 
 @router.get("/api/stats", tags=["统计数据"])

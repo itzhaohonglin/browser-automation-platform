@@ -1,6 +1,7 @@
 import pytest
+from datetime import datetime
 from pydantic import ValidationError
-from app.schemas.config import ConfigBase, ConfigCreate, ConfigUpdate
+from app.schemas.config import ConfigBase, ConfigCreate, ConfigUpdate, ConfigResponse, ConfigListResponse
 
 
 def test_config_base_required_fields():
@@ -118,3 +119,44 @@ def test_config_update_with_auth_profile():
 
     assert update.need_login is True
     assert update.auth_profile == "new_profile"
+
+
+def test_config_response_from_orm():
+    """测试从 ORM 模型创建响应"""
+    # 模拟 ORM 对象
+    class MockConfig:
+        id = 1
+        config_name = "测试配置"
+        target_url = "https://www.example.com"
+        need_login = False
+        auth_profile = None
+        login_url = None
+        input_configs = {"inputs": []}
+        submit_selector = "button"
+        wait_selector = ".results"
+        fields_mapping = {"list_selector": ".item", "fields": []}
+        pagination_selector = None
+        max_pages = 1
+        is_active = True
+        created_at = datetime(2026, 9, 23, 10, 0, 0)
+
+    response = ConfigResponse.model_validate(MockConfig())
+
+    assert response.id == 1
+    assert response.config_name == "测试配置"
+    assert response.created_at == datetime(2026, 9, 23, 10, 0, 0)
+
+
+def test_config_list_response():
+    """测试列表响应"""
+    list_response = ConfigListResponse(
+        total=100,
+        page=1,
+        page_size=20,
+        items=[]
+    )
+
+    assert list_response.total == 100
+    assert list_response.page == 1
+    assert list_response.page_size == 20
+    assert len(list_response.items) == 0

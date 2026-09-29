@@ -11,7 +11,9 @@
     <header class="header">
         <div class="header-content">
             <h1>🚀 浏览器自动化数据采集平台</h1>
-            <div class="connection-status">
+            <div class="header-actions">
+                <button id="manage-configs-btn" class="btn btn-primary">⚙️ 配置管理</button>
+                <button id="view-results-btn" class="btn btn-primary">📋 查看采集结果</button>
                 <span id="ws-status" class="status-badge disconnected">连接中...</span>
             </div>
         </div>
@@ -90,6 +92,145 @@
             </div>
         </section>
     </div>
+
+    <!-- 采集结果模态框 -->
+    <div id="results-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 采集结果</h2>
+                <button id="close-modal-btn" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="results-filters">
+                    <input type="number" id="filter-job-id" placeholder="按任务ID筛选" class="filter-input">
+                    <input type="number" id="filter-config-id" placeholder="按配置ID筛选" class="filter-input">
+                    <button id="apply-filter-btn" class="btn btn-secondary">应用筛选</button>
+                    <button id="clear-filter-btn" class="btn btn-secondary">清除筛选</button>
+                </div>
+                <div id="results-container" class="results-container">
+                    <div class="loading-spinner">加载中...</div>
+                </div>
+                <div class="pagination">
+                    <button id="prev-page-btn" class="btn btn-secondary" disabled>上一页</button>
+                    <span id="page-info" class="page-info">第 1 页</span>
+                    <button id="next-page-btn" class="btn btn-secondary">下一页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 配置管理模态框 -->
+    <div id="config-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>⚙️ 配置管理</h2>
+                <button id="close-config-modal-btn" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="config-actions-toolbar">
+                    <button id="add-config-btn" class="btn btn-success">➕ 新建配置</button>
+                </div>
+                <div id="config-list-container" class="config-list-container">
+                    <div class="loading-spinner">加载中...</div>
+                </div>
+                <div class="pagination">
+                    <button id="config-prev-page-btn" class="btn btn-secondary" disabled>上一页</button>
+                    <span id="config-page-info" class="page-info">第 1 页</span>
+                    <button id="config-next-page-btn" class="btn btn-secondary">下一页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 配置编辑模态框 -->
+    <div id="config-edit-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="config-edit-title">➕ 新建配置</h2>
+                <button id="close-config-edit-modal-btn" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="config-form" class="config-form">
+                    <div class="form-group">
+                        <label for="config_name">配置名称 *</label>
+                        <input type="text" id="config_name" name="config_name" required maxlength="100" placeholder="例如：淘宝商品采集">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="target_url">目标URL *</label>
+                        <input type="url" id="target_url" name="target_url" required placeholder="https://example.com/search">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="need_login" name="need_login">
+                                需要登录
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="is_active" name="is_active" checked>
+                                启用配置
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="auth_profile_group" style="display: none;">
+                        <label for="auth_profile">登录态标识 *</label>
+                        <input type="text" id="auth_profile" name="auth_profile" maxlength="50" placeholder="例如：taobao">
+                    </div>
+
+                    <div class="form-group" id="login_url_group" style="display: none;">
+                        <label for="login_url">登录页URL</label>
+                        <input type="url" id="login_url" name="login_url" placeholder="https://example.com/login">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="input_configs">输入框配置 (JSON) *</label>
+                        <textarea id="input_configs" name="input_configs" rows="4" required placeholder='{"keyword": {"selector": "#search", "value": "{keyword}"}}'></textarea>
+                        <small>格式：{"字段名": {"selector": "选择器", "value": "{参数名}"}}</small>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="submit_selector">提交按钮选择器 *</label>
+                            <input type="text" id="submit_selector" name="submit_selector" required maxlength="200" placeholder="button[type=submit]">
+                        </div>
+                        <div class="form-group">
+                            <label for="wait_selector">等待加载选择器 *</label>
+                            <input type="text" id="wait_selector" name="wait_selector" required maxlength="200" placeholder=".result-list">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="fields_mapping">字段映射规则 (JSON) *</label>
+                        <textarea id="fields_mapping" name="fields_mapping" rows="4" required placeholder='{"title": {"selector": ".item-title", "type": "text"}}'></textarea>
+                        <small>格式：{"字段名": {"selector": "选择器", "type": "text|attr", "attr": "属性名"}}</small>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pagination_selector">下一页选择器</label>
+                            <input type="text" id="pagination_selector" name="pagination_selector" maxlength="200" placeholder=".next-page">
+                        </div>
+                        <div class="form-group">
+                            <label for="max_pages">最大翻页数</label>
+                            <input type="number" id="max_pages" name="max_pages" min="1" value="1">
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="cancel-config-btn" class="btn btn-secondary">取消</button>
+                        <button type="submit" class="btn btn-success">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div id="toast-container" class="toast-container"></div>
 
     <script src="/static/app.js"></script>
 </body>
