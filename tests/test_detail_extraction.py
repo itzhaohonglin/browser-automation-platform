@@ -135,3 +135,93 @@ async def test_extract_detail_with_retry_all_failed():
     assert status == "failed"
     assert "持续错误" in error
     assert "已重试3次" in error
+
+
+@pytest.mark.asyncio
+async def test_extract_list_with_details():
+    """测试列表+详情联合提取"""
+    executor = PlaywrightExecutor()
+
+    page = AsyncMock()
+
+    fields_mapping = {
+        "list_selector": "#gridlist tbody tr",
+        "fields": [
+            {"name": "产品名称", "selector": "td:nth-child(1)", "attr": "text"},
+            {"name": "注册证号", "selector": "td:nth-child(2)", "attr": "text"}
+        ]
+    }
+
+    detail_config = {
+        "enabled": True,
+        "detail_button_selector": "td:nth-child(3) a",
+        "wait_selector": ".detail-content",
+        "close_method": "escape",
+        "fields": [
+            {"name": "详细规格", "selector": "#spec", "attr": "text"}
+        ],
+        "retry": {
+            "max_attempts": 2,
+            "delay_seconds": 0.1
+        }
+    }
+
+    # Mock列表数据提取
+    async def mock_extract_page_data(p, fm):
+        return [
+            {"产品名称": "产品A", "注册证号": "ABC123"},
+            {"产品名称": "产品B", "注册证号": "DEF456"}
+        ]
+
+    executor._extract_page_data = mock_extract_page_data
+
+    # Mock行定位器
+    row_locator = AsyncMock()
+    row_locator.count = AsyncMock(return_value=2)
+
+    # Mock第1行
+    row1 = AsyncMock()
+    button1 = AsyncMock()
+    button1.count = AsyncMock(return_value=1)
+    row1.locator = MagicMock(return_value=button1)
+
+    # Mock第2行
+    row2 = AsyncMock()
+    button2 = AsyncMock()
+    button2.count = AsyncMock(return_value=1)
+    row2.locator = MagicMock(return_value=button2)
+
+    # Mock nth方法
+    def mock_nth(index):
+        return row1 if index == 0 else row2
+
+    row_locator.nth = mock_nth
+    page.locator = MagicMock(return_value=row_locator)
+
+    # Mock详情提取
+    call_count = 0
+    async def mock_extract_detail_with_retry(mp, btn, cfg, idx):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"详细规格": "规格A"}, "success", None
+        else:
+            return {"详细规格": "规格B"}, "success", None
+
+    executor._extract_detail_with_retry = mock_extract_detail_with_retry
+
+    # Mock WebSocket
+    executor.ws_manager = None
+
+    # 执行测试
+    result = await executor._extract_list_with_details(
+        page, fields_mapping, detail_config, job_id=1
+    )
+
+    # 验证
+    assert len(result) == 2
+    assert result[0]["list_data"]["产品名称"] == "产品A"
+    assert result[0]["detail_data"]["详细规格"] == "规格A"
+    assert result[0]["detail_status"] == "success"
+    assert result[1]["list_data"]["产品名称"] == "产品B"
+    assert result[1]["detail_data"]["详细规格"] == "规格B"

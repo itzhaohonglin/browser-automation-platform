@@ -783,6 +783,115 @@ class PlaywrightExecutor:
 
         return {}, "failed", "未知错误"
 
+    async def _extract_list_with_details(
+        self,
+        page: Union[Page, Frame],
+        fields_mapping: Dict,
+        detail_config: Dict,
+        job_id: int
+    ) -> List[Dict]:
+        """
+        提取列表数据并逐条采集详情（单页）
+
+        Args:
+            page: 页面或Frame对象
+            fields_mapping: 列表字段映射配置
+            detail_config: 详情配置
+            job_id: 任务ID（用于进度推送）
+
+        Returns:
+            [
+                {
+                    "list_data": {...},
+                    "detail_data": {...},
+                    "detail_status": "success/failed/skipped",
+                    "detail_error": "..." (可选)
+                }
+            ]
+        """
+        # 1. 先提取当前页所有列表数据
+        self.logger.info("[详情] 开始提取列表数据")
+        list_data = await self._extract_page_data(page, fields_mapping)
+        total_items = len(list_data)
+
+        self.logger.info(f"[详情] 列表数据提取完成，共 {total_items} 条")
+
+        if total_items == 0:
+            self.logger.warning("[详情] 列表数据为空，跳过详情提取")
+            return []
+
+        # 2. 获取所有列表行的定位器
+        list_selector = fields_mapping.get('list_selector')
+        if not list_selector:
+            self.logger.error("[详情] 缺少 list_selector 配置")
+            return [{"list_data": item, "detail_data": {}, "detail_status": "skipped"}
+                    for item in list_data]
+
+        rows_locator = page.locator(list_selector)
+        rows_count = await rows_locator.count()
+
+        self.logger.info(f"[详情] 找到 {rows_count} 个列表行")
+
+        # 3. 遍历每一行，提取详情
+        result = []
+        detail_button_selector = detail_config.get('detail_button_selector')
+
+        for i in range(total_items):
+            self.logger.info(f"[详情] 处理第 {i + 1}/{total_items} 条数据")
+
+            # 重新定位该行（避免DOM变化导致引用失效）
+            row = rows_locator.nth(i)
+
+            # 在该行内定位详情按钮
+            detail_button = row.locator(detail_button_selector)
+            button_count = await detail_button.count()
+
+            if button_count == 0:
+                # 详情按钮不存在
+                self.logger.warning(f"[详情] 第 {i + 1} 条：详情按钮不存在，跳过")
+                result.append({
+                    "list_data": list_data[i],
+                    "detail_data": {},
+                    "detail_status": "skipped"
+                })
+                continue
+
+            # 提取详情（带重试）
+            detail_data, status, error = await self._extract_detail_with_retry(
+                page, detail_button, detail_config, i
+            )
+
+            # 组装数据
+            item = {
+                "list_data": list_data[i],
+                "detail_data": detail_data,
+                "detail_status": status
+            }
+
+            if error:
+                item["detail_error"] = error
+
+            result.append(item)
+
+            # 推送进度
+            if self.ws_manager:
+                await self._broadcast_log(
+                    "info",
+                    f"[详情] 第 {i + 1}/{total_items} 条详情提取{status}"
+                )
+
+        # 统计
+        success_count = sum(1 for item in result if item["detail_status"] == "success")
+        failed_count = sum(1 for item in result if item["detail_status"] == "failed")
+        skipped_count = sum(1 for item in result if item["detail_status"] == "skipped")
+
+        self.logger.info(
+            f"[详情] 当前页详情采集完成：总数 {total_items}, "
+            f"成功 {success_count}, 失败 {failed_count}, 跳过 {skipped_count}"
+        )
+
+        return result
+
     async def _extract_with_pagination(
         self,
         page: Union[Page, Frame],
