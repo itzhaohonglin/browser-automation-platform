@@ -725,6 +725,64 @@ class PlaywrightExecutor:
             self.logger.error(f"[详情] 第 {row_index + 1} 条提取失败: {error_msg}")
             return {}, "failed", error_msg
 
+    async def _extract_detail_with_retry(
+        self,
+        main_page: Union[Page, Frame],
+        detail_button: Locator,
+        detail_config: Dict,
+        row_index: int
+    ) -> Tuple[Dict, str, Optional[str]]:
+        """
+        带重试机制的详情提取
+
+        Args:
+            main_page: 列表页面/Frame
+            detail_button: 详情按钮定位器
+            detail_config: 详情配置
+            row_index: 当前行索引
+
+        Returns:
+            (detail_data, status, error_msg)
+        """
+        max_attempts = detail_config.get('retry', {}).get('max_attempts', 3)
+        delay = detail_config.get('retry', {}).get('delay_seconds', 2)
+
+        for attempt in range(max_attempts):
+            try:
+                self.logger.info(
+                    f"[详情] 第 {row_index + 1} 条详情提取尝试 {attempt + 1}/{max_attempts}"
+                )
+
+                detail_data, status, error = await self._extract_detail_data(
+                    main_page, detail_button, detail_config, row_index
+                )
+
+                if status == "success":
+                    if attempt > 0:
+                        self.logger.info(
+                            f"[详情] 第 {row_index + 1} 条在第 {attempt + 1} 次尝试成功"
+                        )
+                    return detail_data, status, error
+                else:
+                    # 如果返回failed状态，也算一次失败
+                    raise Exception(error if error else "提取失败")
+
+            except Exception as e:
+                self.logger.warning(
+                    f"[详情] 第 {row_index + 1} 条提取失败（尝试 {attempt + 1}/{max_attempts}）: {e}"
+                )
+
+                if attempt < max_attempts - 1:
+                    self.logger.info(f"[详情] 等待 {delay} 秒后重试...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    error_msg = f"{str(e)}，已重试{max_attempts}次"
+                    self.logger.error(f"[详情] 第 {row_index + 1} 条提取最终失败: {error_msg}")
+                    return {}, "failed", error_msg
+
+        return {}, "failed", "未知错误"
+
     async def _extract_with_pagination(
         self,
         page: Union[Page, Frame],

@@ -61,3 +61,77 @@ async def test_extract_detail_data_with_iframe():
     assert "产品名称" in detail_data
     assert detail_data["产品名称"] == "测试产品"
     detail_button.click.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_with_retry_success_on_second_attempt():
+    """测试详情提取重试 - 第2次成功"""
+    executor = PlaywrightExecutor()
+
+    main_page = AsyncMock()
+    detail_button = AsyncMock()
+
+    detail_config = {
+        "detail_iframe_selector": None,
+        "wait_selector": ".detail-content",
+        "close_method": "escape",
+        "fields": [{"name": "field1", "selector": "#f1", "attr": "text"}],
+        "retry": {
+            "max_attempts": 3,
+            "delay_seconds": 0.1
+        }
+    }
+
+    # 模拟第1次失败，第2次成功
+    call_count = 0
+    async def mock_extract(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("临时错误")
+        return {"field1": "value1"}, "success", None
+
+    executor._extract_detail_data = mock_extract
+
+    # 执行测试
+    detail_data, status, error = await executor._extract_detail_with_retry(
+        main_page, detail_button, detail_config, 0
+    )
+
+    # 验证
+    assert status == "success"
+    assert call_count == 2
+    assert detail_data["field1"] == "value1"
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_with_retry_all_failed():
+    """测试详情提取重试 - 全部失败"""
+    executor = PlaywrightExecutor()
+
+    main_page = AsyncMock()
+    detail_button = AsyncMock()
+
+    detail_config = {
+        "retry": {
+            "max_attempts": 3,
+            "delay_seconds": 0.1
+        },
+        "fields": []
+    }
+
+    # 模拟始终失败
+    async def mock_extract(*args, **kwargs):
+        raise Exception("持续错误")
+
+    executor._extract_detail_data = mock_extract
+
+    # 执行测试
+    detail_data, status, error = await executor._extract_detail_with_retry(
+        main_page, detail_button, detail_config, 0
+    )
+
+    # 验证
+    assert status == "failed"
+    assert "持续错误" in error
+    assert "已重试3次" in error
