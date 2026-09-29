@@ -601,7 +601,8 @@ class PlaywrightExecutor:
         try:
             # 1. 点击详情按钮
             self.logger.info(f"[详情] 第 {row_index + 1} 条：点击详情按钮")
-            await detail_button.click(timeout=10000)
+            click_timeout = detail_config.get('timeout', {}).get('click', 10000)
+            await detail_button.click(timeout=click_timeout)
 
             # 2. 等待并切换到详情iframe（如果配置了）
             detail_frame = main_page
@@ -676,31 +677,42 @@ class PlaywrightExecutor:
 
             self.logger.info(f"[详情] 第 {row_index + 1} 条提取完成，字段数: {len(detail_data)}")
 
-            # 5. 关闭详情
-            close_method = detail_config.get('close_method', 'auto')
-            close_selector = detail_config.get('close_selector')
+            # 5. 关闭详情（失败不影响数据返回）
+            try:
+                close_method = detail_config.get('close_method', 'auto')
+                close_selector = detail_config.get('close_selector')
+                close_timeout = detail_config.get('timeout', {}).get('close', 5000)
 
-            if close_method == 'click' and close_selector:
-                # 点击关闭按钮
-                self.logger.info(f"[详情] 点击关闭按钮: {close_selector}")
-                await detail_frame.click(close_selector, timeout=5000)
-            elif close_method == 'escape':
-                # 按ESC键
-                self.logger.info(f"[详情] 按ESC键关闭")
-                await detail_frame.keyboard.press('Escape')
-            elif close_method == 'auto':
-                # 自动选择：优先点击，失败则ESC
-                if close_selector:
-                    try:
-                        await detail_frame.click(close_selector, timeout=3000)
-                    except:
-                        self.logger.info(f"[详情] 关闭按钮点击失败，改用ESC键")
-                        await detail_frame.keyboard.press('Escape')
-                else:
+                if close_method == 'click' and close_selector:
+                    # 点击关闭按钮
+                    self.logger.info(f"[详情] 点击关闭按钮: {close_selector}")
+                    await detail_frame.click(close_selector, timeout=close_timeout)
+                elif close_method == 'escape':
+                    # 按ESC键
+                    self.logger.info(f"[详情] 按ESC键关闭")
                     await detail_frame.keyboard.press('Escape')
+                elif close_method == 'auto':
+                    # 自动选择：优先点击，失败则ESC
+                    if close_selector:
+                        try:
+                            await detail_frame.click(close_selector, timeout=close_timeout)
+                        except Exception as e:
+                            self.logger.info(f"[详情] 关闭按钮点击失败 ({e})，改用ESC键")
+                            await detail_frame.keyboard.press('Escape')
+                    else:
+                        await detail_frame.keyboard.press('Escape')
 
-            # 6. 等待返回列表页
-            await asyncio.sleep(0.5)
+                # 6. 等待返回列表页
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                self.logger.warning(f"[详情] 关闭操作失败，但数据已提取: {e}")
+                # 尝试强制ESC作为后备
+                try:
+                    await detail_frame.keyboard.press('Escape')
+                    await asyncio.sleep(0.5)
+                except:
+                    pass
 
             return detail_data, "success", None
 
