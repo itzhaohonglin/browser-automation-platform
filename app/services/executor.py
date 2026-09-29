@@ -892,6 +892,132 @@ class PlaywrightExecutor:
 
         return result
 
+    async def _extract_list_with_details_paginated(
+        self,
+        page: Union[Page, Frame],
+        config: CrawlerConfig,
+        job_id: int
+    ) -> Tuple[List[Dict], int, Dict]:
+        """
+        分页提取列表+详情数据
+
+        Args:
+            page: 页面或Frame对象
+            config: 爬虫配置对象
+            job_id: 任务ID
+
+        Returns:
+            (all_items, page_count, summary)
+            - all_items: 所有页的数据列表
+            - page_count: 实际爬取的页数
+            - summary: 统计信息字典
+        """
+        all_items = []
+        current_page = 1
+        detail_success = 0
+        detail_failed = 0
+        detail_skipped = 0
+
+        fields_mapping = config.fields_mapping
+        detail_config = fields_mapping.get('detail_config', {})
+        timeouts = self._load_timeouts(config)
+
+        while current_page <= config.max_pages:
+            self.logger.info(f"[详情] 开始提取第 {current_page} 页（最大 {config.max_pages} 页）")
+
+            # 1. 提取当前页列表+详情
+            page_items = await self._extract_list_with_details(
+                page, fields_mapping, detail_config, job_id
+            )
+
+            all_items.extend(page_items)
+
+            # 2. 统计
+            for item in page_items:
+                if item["detail_status"] == "success":
+                    detail_success += 1
+                elif item["detail_status"] == "failed":
+                    detail_failed += 1
+                elif item["detail_status"] == "skipped":
+                    detail_skipped += 1
+
+            self.logger.info(
+                f"[详情] 第 {current_page} 页完成，本页 {len(page_items)} 条"
+            )
+
+            # 3. 推送分页进度
+            if self.ws_manager:
+                await self._broadcast_progress(
+                    job_id=job_id,
+                    data={
+                        "current_page": current_page,
+                        "total_pages": config.max_pages,
+                        "status": "processing",
+                        "detail_progress": {
+                            "total": len(all_items),
+                            "success": detail_success,
+                            "failed": detail_failed,
+                            "skipped": detail_skipped
+                        }
+                    }
+                )
+
+            # 4. 检查是否需要翻页
+            if current_page >= config.max_pages:
+                self.logger.info(f"[详情] 已达到最大页数 {config.max_pages}")
+                break
+
+            # 5. 检查下一页按钮是否存在
+            if not config.pagination_selector:
+                self.logger.info("[详情] 未配置分页选择器，停止翻页")
+                break
+
+            next_button = page.locator(config.pagination_selector)
+            count = await next_button.count()
+
+            if count == 0:
+                self.logger.info("[详情] 下一页按钮不存在，停止翻页")
+                break
+
+            # 6. 检查按钮是否可用
+            is_disabled = await next_button.is_disabled()
+            if is_disabled:
+                self.logger.info("[详情] 下一页按钮已禁用，停止翻页")
+                break
+
+            # 7. 点击下一页
+            self.logger.info("[详情] 点击下一页按钮")
+            await next_button.click(timeout=timeouts['click'])
+
+            if self.ws_manager:
+                await self._broadcast_log("info", f"[详情] 翻页到第 {current_page + 1} 页")
+
+            # 8. 等待新页面加载
+            await page.wait_for_selector(
+                config.wait_selector,
+                state="visible",
+                timeout=timeouts['wait_selector']
+            )
+            await asyncio.sleep(2)  # 额外等待确保数据加载完成
+
+            current_page += 1
+
+        # 9. 生成摘要
+        summary = {
+            "total_items": len(all_items),
+            "detail_success": detail_success,
+            "detail_failed": detail_failed,
+            "detail_skipped": detail_skipped,
+            "pages_crawled": current_page
+        }
+
+        self.logger.info(
+            f"[详情] 全部采集完成：共 {current_page} 页，{len(all_items)} 条数据，"
+            f"成功 {detail_success}，失败 {detail_failed}，跳过 {detail_skipped}"
+        )
+
+        return all_items, current_page, summary
+
     async def _extract_with_pagination(
         self,
         page: Union[Page, Frame],

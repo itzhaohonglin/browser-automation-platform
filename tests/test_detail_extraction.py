@@ -225,3 +225,70 @@ async def test_extract_list_with_details():
     assert result[0]["detail_status"] == "success"
     assert result[1]["list_data"]["产品名称"] == "产品B"
     assert result[1]["detail_data"]["详细规格"] == "规格B"
+
+
+@pytest.mark.asyncio
+async def test_extract_list_with_details_paginated():
+    """测试分页+详情提取"""
+    executor = PlaywrightExecutor()
+
+    page = AsyncMock()
+
+    config = MagicMock()
+    config.fields_mapping = {
+        "list_selector": "#gridlist tbody tr",
+        "fields": [{"name": "name", "selector": "td", "attr": "text"}],
+        "detail_config": {
+            "enabled": True,
+            "detail_button_selector": "a",
+            "wait_selector": ".detail",
+            "fields": [{"name": "detail", "selector": "div", "attr": "text"}],
+            "retry": {"max_attempts": 2, "delay_seconds": 0.1}
+        }
+    }
+    config.pagination_selector = "#next"
+    config.max_pages = 2
+    config.wait_selector = "#gridlist"
+
+    # Mock单页提取（每页返回2条数据）
+    page_call_count = 0
+    async def mock_extract_list_with_details(p, fm, dc, jid):
+        nonlocal page_call_count
+        page_call_count += 1
+        return [
+            {"list_data": {"name": f"Page{page_call_count}-Item1"},
+             "detail_data": {"detail": "D1"}, "detail_status": "success"},
+            {"list_data": {"name": f"Page{page_call_count}-Item2"},
+             "detail_data": {"detail": "D2"}, "detail_status": "success"}
+        ]
+
+    executor._extract_list_with_details = mock_extract_list_with_details
+
+    # Mock _load_timeouts
+    executor._load_timeouts = lambda cfg: {
+        'click': 10000,
+        'wait_selector': 15000
+    }
+
+    # Mock翻页按钮
+    next_button = AsyncMock()
+    next_button.count = AsyncMock(side_effect=[1, 0])  # 第1页有下一页，第2页没有
+    next_button.is_disabled = AsyncMock(return_value=False)
+    next_button.click = AsyncMock()
+    page.locator = MagicMock(return_value=next_button)
+    page.wait_for_selector = AsyncMock()
+
+    # Mock WebSocket
+    executor.ws_manager = None
+
+    # 执行测试
+    all_items, page_count, summary = await executor._extract_list_with_details_paginated(
+        page, config, job_id=1
+    )
+
+    # 验证
+    assert len(all_items) == 4  # 2页 x 2条
+    assert page_count == 2
+    assert summary["total_items"] == 4
+    assert summary["detail_success"] == 4
+    assert summary["detail_failed"] == 0
