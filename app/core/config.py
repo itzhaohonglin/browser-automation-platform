@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     """
 
     # 数据库配置 - 必须通过环境变量提供
+    # MySQL 示例: mysql+aiomysql://user:password@host:3306/database?charset=utf8mb4
+    # SQL Server 示例: mssql+aioodbc://user:password@host:1433/database?driver=ODBC+Driver+17+for+SQL+Server
     DATABASE_URL: str
 
     # 应用配置
