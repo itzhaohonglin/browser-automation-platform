@@ -66,7 +66,8 @@
 | **Web 服务器** | Uvicorn | 0.30.6 | ASGI 服务器 |
 | **浏览器自动化** | Playwright | 1.47.0 | 跨浏览器自动化库 |
 | **数据库 ORM** | SQLAlchemy | 2.0.35 | 异步 ORM |
-| **数据库驱动** | aiomysql | 0.2.0 | 异步 MySQL 驱动 |
+| **数据库驱动** | aioodbc | 0.5.0 | 异步 SQL Server 驱动 |
+| **数据库服务器** | SQL Server | - | Windows 平台 |
 | **数据库迁移** | Alembic | 1.13.2 | 数据库版本管理 |
 | **任务调度** | APScheduler | 3.10.4 | 定时任务框架 |
 | **配置管理** | Pydantic | 2.9.2 | 数据验证和配置 |
@@ -88,7 +89,8 @@
 ### 环境要求
 
 - Python 3.10 或更高版本
-- MySQL 8.0 或更高版本
+- SQL Server (Express 或更高版本)
+- Microsoft ODBC Driver 17 for SQL Server
 - Windows/Linux/macOS
 
 ### 安装步骤
@@ -125,6 +127,21 @@ pip install -r requirements-dev.txt
 playwright install chromium
 ```
 
+**安装 ODBC Driver（必需）**:
+
+下载并安装 [Microsoft ODBC Driver 17 for SQL Server](https://docs.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server)
+
+验证安装：
+```bash
+# Windows: 打开"ODBC 数据源管理器"
+odbcad32.exe
+
+# 检查"驱动程序"选项卡中是否有 "ODBC Driver 17 for SQL Server"
+
+# 或使用 Python 验证
+python -c "import pyodbc; print([x for x in pyodbc.drivers() if 'SQL Server' in x])"
+```
+
 #### 4. 配置环境变量
 
 ```bash
@@ -137,7 +154,7 @@ cp .env.example .env
 
 **`.env` 配置示例**:
 ```env
-DATABASE_URL=mysql+aiomysql://username:password@localhost:3306/bap
+DATABASE_URL=mssql+aioodbc://sa:YourPassword@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes
 DEBUG=False
 HEADLESS_MODE=True
 LOG_LEVEL=INFO
@@ -145,11 +162,26 @@ LOG_LEVEL=INFO
 
 #### 5. 初始化数据库
 
-```bash
-# 创建数据库
-mysql -u root -p -e "CREATE DATABASE bap CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+**前置条件:**
+- 已安装 SQL Server（Express 或更高版本）
+- 已安装 Microsoft ODBC Driver 17 for SQL Server
 
-# 运行数据库迁移
+**创建数据库:**
+
+```bash
+# 使用 sqlcmd（命令行）
+sqlcmd -S localhost -U sa -P YourPassword -Q "CREATE DATABASE bap COLLATE Chinese_PRC_CI_AS;"
+
+# 或使用 SQL Server Management Studio (SSMS) 图形界面创建
+```
+
+**执行迁移:**
+
+```bash
+# 生成初始迁移（首次运行）
+alembic revision --autogenerate -m "initial schema"
+
+# 执行迁移
 alembic upgrade head
 ```
 
@@ -207,7 +239,7 @@ python -m app.main
 └────────────────────┬────────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────────┐
-│                      MySQL 数据库                            │
+│                   SQL Server 数据库                          │
 └─────────────────────────────────────────────────────────────┘
 
              ┌──────────────────────────┐
@@ -521,7 +553,7 @@ start htmlcov/index.html  # Windows
 DEBUG=False
 HEADLESS_MODE=True
 LOG_LEVEL=INFO
-DATABASE_URL=mysql+aiomysql://user:pass@prod-host:3306/bap
+DATABASE_URL=mssql+aioodbc://bap_user:password@sqlserver.company.com:1433/bap_prod?driver=ODBC+Driver+17+for+SQL+Server
 ```
 
 ### Docker 部署（规划中）
