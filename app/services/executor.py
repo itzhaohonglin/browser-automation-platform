@@ -318,7 +318,8 @@ class PlaywrightExecutor:
 
         for input_cfg in input_configs:
             selector = input_cfg['selector']
-            param_key = input_cfg.get('param_key')
+            # 兼容 param_key 和 param_name
+            param_key = input_cfg.get('param_key') or input_cfg.get('param_name')
             input_type = input_cfg.get('input_type', 'text')
 
             # 从 query_params 中获取值
@@ -602,7 +603,15 @@ class PlaywrightExecutor:
             # 1. 点击详情按钮
             self.logger.info(f"[详情] 第 {row_index + 1} 条：点击详情按钮")
             click_timeout = detail_config.get('timeout', {}).get('click', 10000)
-            await detail_button.click(timeout=click_timeout)
+            click_method = detail_config.get('click_method', 'default')
+
+            if click_method == 'javascript':
+                # 使用JavaScript点击，避免元素遮挡问题
+                self.logger.info(f"[详情] 使用JavaScript点击方法")
+                await detail_button.evaluate("element => element.click()")
+            else:
+                # 默认Playwright点击
+                await detail_button.click(timeout=click_timeout)
 
             # 2. 等待并切换到详情iframe（如果配置了）
             detail_frame = main_page
@@ -1573,6 +1582,34 @@ class PlaywrightExecutor:
 
                 else:
                     self.logger.info("使用单页提取")
+
+                    # 如果配置了 list_selector，明确等待该选择器
+                    if 'list_selector' in config.fields_mapping:
+                        list_selector = config.fields_mapping['list_selector']
+                        self.logger.info(f"等待列表选择器: {list_selector}")
+
+                        # 尝试等待，超时时间增加到30秒
+                        list_appeared = False
+                        try:
+                            await target_frame.wait_for_selector(list_selector, state="attached", timeout=30000)
+                            self.logger.info(f"列表选择器已出现")
+                            list_appeared = True
+                        except Exception as e:
+                            self.logger.warning(f"等待列表选择器超时（30秒）: {e}")
+
+                        # 如果第一次超时，再等待10秒并重试
+                        if not list_appeared:
+                            self.logger.info("额外等待10秒后重试...")
+                            await asyncio.sleep(10)
+                            try:
+                                count = await target_frame.locator(list_selector).count()
+                                if count > 0:
+                                    self.logger.info(f"重试成功，找到 {count} 个元素")
+                                    list_appeared = True
+                                else:
+                                    self.logger.warning("重试后仍未找到元素")
+                            except Exception as e2:
+                                self.logger.error(f"重试检查失败: {e2}")
 
                     # 等待数据稳定
                     extraction_cfg = self._load_extraction_config(config)

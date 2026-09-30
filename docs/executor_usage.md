@@ -108,6 +108,25 @@ SELECT extracted_data FROM crawler_results WHERE job_id = 1;
 3. 提取数据
 4. 重复直到无下一页或达到 max_pages
 
+## 详情采集配置
+
+### click_method（可选）
+
+指定详情按钮的点击方法：
+- `"default"`: 使用标准Playwright点击（默认）
+- `"javascript"`: 使用JavaScript直接触发点击，适用于元素被遮挡的情况
+
+示例：
+```json
+{
+  "detail_config": {
+    "enabled": true,
+    "detail_button_selector": "a:has-text('详情')",
+    "click_method": "javascript"
+  }
+}
+```
+
 ## 登录态配置
 
 如果网站需要登录：
