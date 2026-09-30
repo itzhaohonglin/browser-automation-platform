@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from app.core.config import settings
 
 
-# 将连接字符串从 mysql+pymysql:// 转换为 mysql+aiomysql://
-DATABASE_URL = settings.DATABASE_URL.replace("pymysql", "aiomysql")
+# 直接使用配置的 DATABASE_URL（支持 MySQL 和 SQL Server）
+DATABASE_URL = settings.DATABASE_URL
 
 # 创建异步引擎
 async_engine = create_async_engine(
@@ -14,7 +14,10 @@ async_engine = create_async_engine(
     pool_pre_ping=True,            # 连接池健康检查
     pool_size=5,                   # 连接池大小
     max_overflow=10,               # 最大溢出连接数
-    pool_recycle=3600              # 连接回收时间（1小时）
+    pool_recycle=3600,             # 连接回收时间（1小时）
+    connect_args={
+        "timeout": 30              # 连接超时（秒）
+    }
 )
 
 # 创建异步 Session 工厂
