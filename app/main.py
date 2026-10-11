@@ -18,6 +18,7 @@ from app.api.config_endpoints import router as config_router
 from app.api.metrics import router as metrics_router
 from app.api.alerts import router as alerts_router
 from app.api.config_test import router as config_test_router
+from app.api.rate_limit import router as rate_limit_router
 from app.api.websocket import websocket_manager
 from app.services.scheduler import TaskScheduler
 from app.services.alert_engine import alert_engine
@@ -58,7 +59,10 @@ logger = logging.getLogger(__name__)
 
 def create_scheduler(ws_manager=None):
     """创建调度器并接线进程池管理器"""
-    pm = ProcessPoolManager()
+    pm = ProcessPoolManager(
+        max_workers=settings.MAX_WORKERS,
+        memory_limit_mb=settings.WORKER_MEMORY_LIMIT_MB
+    )
     sched = TaskScheduler(ws_manager=ws_manager, pool_manager=pm)
     return sched, pm
 
@@ -151,6 +155,7 @@ app.include_router(config_router)
 app.include_router(metrics_router)
 app.include_router(alerts_router)
 app.include_router(config_test_router)
+app.include_router(rate_limit_router)
 
 # 注册 WebSocket 路由
 @app.websocket("/ws")

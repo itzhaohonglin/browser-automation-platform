@@ -4,6 +4,7 @@ from sqlalchemy import Integer, JSON, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
+from app.core.database import ChineseJSON
 
 
 class CrawlerResult(Base):
@@ -23,8 +24,8 @@ class CrawlerResult(Base):
     config_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="冗余字段便于查询")
 
     # 数据字段
-    query_params: Mapped[dict] = mapped_column(JSON, nullable=False, comment="查询参数快照")
-    extracted_data: Mapped[dict] = mapped_column(JSON, nullable=False, comment="提取的业务数据")
+    query_params: Mapped[dict] = mapped_column(ChineseJSON, nullable=False, comment="查询参数快照")
+    extracted_data: Mapped[dict] = mapped_column(ChineseJSON, nullable=False, comment="提取的业务数据")
     page_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False, comment="实际抓取页数")
 
     # 时间戳

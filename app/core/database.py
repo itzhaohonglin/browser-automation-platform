@@ -1,7 +1,46 @@
 # app/core/database.py
-from typing import AsyncGenerator
+import json
+from typing import AsyncGenerator, Any
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import JSON, TypeDecorator, Text
 from app.core.config import settings
+
+
+class ChineseJSON(TypeDecorator):
+    """自定义 JSON 类型，保留中文字符而不转义为 Unicode
+
+    SQL Server 的 JSON 存储为 NVARCHAR，我们需要：
+    1. 写入时：手动序列化为 JSON 字符串（ensure_ascii=False）
+    2. 读取时：手动反序列化为 Python 对象
+    """
+
+    impl = Text  # 使用 Text 而不是 JSON，避免 SQLAlchemy 的自动序列化
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect) -> str | None:
+        """写入数据库时：Python 对象 → JSON 字符串（保留中文）"""
+        if value is not None:
+            # ensure_ascii=False 确保中文不被转义为 \uXXXX
+            return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+        return value
+
+    def process_result_value(self, value: str | None, dialect) -> Any:
+        """从数据库读取时：JSON 字符串 → Python 对象"""
+        if value is None:
+            return value
+
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                # 如果解析失败，返回空字典而不是原始字符串
+                return {}
+
+        # 如果已经是 dict（某些驱动可能自动解析），直接返回
+        if isinstance(value, dict):
+            return value
+
+        return value
 
 
 # 直接使用配置的 DATABASE_URL（支持 MySQL 和 SQL Server）

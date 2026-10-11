@@ -1,69 +1,42 @@
 @echo off
-REM ====================================
-REM Batch Import Jobs from File
-REM ====================================
-
 echo.
 echo ======================================
 echo   Batch Import Jobs
 echo ======================================
 echo.
 
-REM Check if main executable exists
+REM Check if we are in the correct directory
 if not exist browser-automation-platform.exe (
-    echo [ERROR] Main program not found
-    echo [INFO] Please run this script in the installation directory
+    echo [ERROR] Please run this script in the dist\browser-automation-platform directory
     pause
     exit /b 1
 )
 
-REM Check config file
+REM Check config
 if not exist .env (
-    echo [ERROR] Config file .env not found
-    echo [INFO] Please run install.bat first
+    echo [ERROR] Config file .env not found. Please run install.bat first.
     pause
     exit /b 1
 )
 
-REM Check if import data directory exists
+REM Create import_data directory if not exists
 if not exist import_data mkdir import_data
 
-echo This script imports tasks from a text or CSV file.
+echo Available import files in import_data\:
 echo.
-echo Supported formats:
-echo   - Text (.txt): one registration number per line
-echo   - CSV (.csv): one registration number per line
-echo.
-echo File location: import_data\
-echo.
-echo Example file content (import_data\jobs.txt):
-echo   滇械注准20192140008
-echo   京械注准20210001234
-echo   沪械注准20200005678
-echo.
-echo Lines starting with # are ignored.
-echo.
-pause
 
-REM List available files
+REM List files - use simple dir command
+dir /b import_data\*.txt 2>nul
+dir /b import_data\*.csv 2>nul
+
 echo.
-echo Available import files:
-echo.
-dir /b import_data\*.txt import_data\*.csv 2>nul
-if errorlevel 1 (
-    echo [INFO] No import files found in import_data\ directory
-    echo.
-    echo Please:
-    echo   1. Create a TXT or CSV file (one registration number per line)
-    echo   2. Place it in the import_data\ directory
-    echo   3. Run this script again
-    echo.
+set /p FILENAME="Enter filename (e.g., jobs.txt): "
+
+if "%FILENAME%"=="" (
+    echo [ERROR] No filename entered
     pause
-    exit /b 0
+    exit /b 1
 )
-
-echo.
-set /p FILENAME="Enter filename (without path): "
 
 if not exist "import_data\%FILENAME%" (
     echo [ERROR] File not found: import_data\%FILENAME%
@@ -72,19 +45,20 @@ if not exist "import_data\%FILENAME%" (
 )
 
 echo.
-echo [RUN] Importing jobs from import_data\%FILENAME%...
+echo [INFO] Importing from: import_data\%FILENAME%
 echo.
 
-REM Run batch import via main program
+REM Run import
 "%~dp0browser-automation-platform.exe" --import-jobs "import_data\%FILENAME%"
+
 if errorlevel 1 (
     echo.
-    echo [ERROR] Import failed
+    echo [ERROR] Import failed. Check the error message above.
     echo.
-    echo Please check:
-    echo   1. File format is correct (one registration number per line)
-    echo   2. The NHSA config is initialized (run init_config.bat)
-    echo   3. Database connection is correct in .env
+    echo Common issues:
+    echo   1. NHSA config not initialized - run init_config.bat
+    echo   2. Database connection issue - check .env file
+    echo   3. File format issue - one registration number per line
     echo.
     pause
     exit /b 1
@@ -93,12 +67,12 @@ if errorlevel 1 (
 echo.
 echo ======================================
 echo   Import Complete!
-echo ======================================
+======================================
 echo.
-echo You can now:
-echo   1. Start the service: startup.bat
-echo   2. View tasks in dashboard: http://127.0.0.1:8000/static/index.html
-echo   3. Tasks will be executed automatically
+echo Next steps:
+echo   1. Run startup.bat to start the service
+echo   2. Open http://127.0.0.1:8000/static/index.html
+echo   3. Tasks will execute automatically
 echo.
 
 pause

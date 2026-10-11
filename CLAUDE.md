@@ -14,7 +14,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **核心特性**：
 - 通过数据库配置驱动采集任务（无需修改代码）
 - 支持多站点登录态隔离和持久化
-- 失败任务自动补跑（APScheduler 每 30 分钟扫描）
+- 失败任务自动补跑（可配置重试间隔和次数）
+- 进程池并发执行（可配置工作进程数）
+- **速率限流控制（可配置时间窗口和任务数，防止被封禁）**
 - WebSocket 实时推送任务状态和日志
 - 支持复杂页面（多层 iframe、详情弹窗、分页）
 
@@ -30,7 +32,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 常用命令
 
-### 环境初始化
+### 📦 打包版本（推荐 - 无需 Python 环境）
+
+适用于 `dist/browser-automation-platform/` 目录，所有操作通过批处理文件完成：
+
+```bash
+# === 首次安装 ===
+install.bat                # 配置环境变量和数据库连接（包含限流配置提示）
+init_database.bat          # 创建数据库表结构
+install_browser.bat        # 安装 Playwright Chromium 浏览器
+init_config.bat            # 初始化 NHSA 采集配置
+
+# === 批量导入任务 ===
+# 1. 准备数据文件：import_data\jobs.txt（每行一个注册证号）
+# 2. 运行导入脚本
+batch_import.bat           # 交互式批量导入任务
+
+# === 启动和监控 ===
+startup.bat                # 启动 Web 服务
+check_config.bat           # 检查配置文件是否正确
+
+# === 手动执行命令（高级用户）===
+browser-automation-platform.exe --init-config              # 初始化配置
+browser-automation-platform.exe --import-jobs "file.txt"   # 导入任务
+browser-automation-platform.exe --migrate                  # 执行数据库迁移
+browser-automation-platform.exe --install-browser          # 安装浏览器驱动
+browser-automation-platform.exe                            # 启动服务
+```
+
+**重要**: 打包版本的配置文件（`.env`）在首次运行 `install.bat` 时会从 `.env.template` 自动创建，包含所有配置项及详细说明。如需更新已部署版本的配置，参考 `docs/package_config_update.md`。
+
+### 🔧 开发环境（需要 Python 环境）
+
+#### 环境初始化
 ```bash
 # 安装依赖
 pip install -r requirements.txt
@@ -43,16 +77,16 @@ cp .env.example .env
 
 # 初始化数据库（SQL Server）
 # 方式1: 使用 sqlcmd
-sqlcmd -S localhost -U sa -P YourPassword -Q "CREATE DATABASE bap COLLATE Chinese_PRC_CI_AS;"
+sqlcmd -S localhost -U sa -P YourPassword -Q "CREATE DATABASE bap COLLATE Latin1_General_100_CI_AS_SC_UTF8;"
 
 # 方式2: 使用 SQL Server Management Studio (SSMS)
-# 手动创建数据库 bap，COLLATE 设置为 Chinese_PRC_CI_AS
+# 手动创建数据库 bap，COLLATE 设置为 Latin1_General_100_CI_AS_SC_UTF8
 
 # 执行数据库迁移
 alembic upgrade head
 ```
 
-### 启动服务
+#### 启动服务
 ```bash
 # 开发模式（推荐）
 uvicorn app.main:app --reload
@@ -61,7 +95,7 @@ uvicorn app.main:app --reload
 python -m app.main
 ```
 
-### 数据库操作
+#### 数据库操作
 ```bash
 # 创建迁移脚本
 alembic revision --autogenerate -m "描述"
@@ -79,7 +113,7 @@ alembic history
 python scripts/verify_migration.py
 ```
 
-### 测试
+#### 测试
 ```bash
 # 运行所有测试
 pytest
@@ -94,13 +128,16 @@ pytest -v -s --cov=app --cov-report=html
 python scripts/final_e2e_test.py
 ```
 
-### 初始化配置和任务
+#### 初始化配置和任务
 ```bash
 # 初始化 NHSA 注册证号查询配置（示例）
 python scripts/init_nhsa_registration_config.py
 
-# 批量导入任务
-python scripts/batch_import_registration_jobs.py
+# 批量导入任务（从文件）
+python scripts/batch_import_registration_jobs.py path/to/jobs.txt
+
+# 批量导入任务（交互式）
+python scripts/import_registration_numbers_from_txt.py
 
 # 导出样本数据
 python scripts/export_sample_data.py
@@ -150,7 +187,7 @@ FastAPI 应用层 (app/main.py)
     ├─ JobQueue - 任务队列
     └─ CrawlerResult - 采集结果
     ↓
-MySQL 数据库
+SQL Server 数据库
 ```
 
 ### 核心执行流程
@@ -511,7 +548,12 @@ if sys.platform == "win32":
 ├─ DATABASE_URL              # 数据库连接（必填）
 ├─ HEADLESS_MODE             # true/false
 ├─ LOG_LEVEL                 # INFO/DEBUG/WARNING
-└─ DEBUG                     # true/false
+├─ DEBUG                     # true/false
+├─ MAX_WORKERS               # 最大工作进程数（并发任务数，默认3）
+├─ RETRY_INTERVAL_MINUTES    # 失败任务重试间隔（分钟，默认30）
+├─ MAX_RETRY_COUNT           # 最大重试次数（默认3）
+├─ RETRY_BATCH_SIZE          # 每批重试任务数量（默认100）
+└─ DISPATCH_INTERVAL_MINUTES # 任务分发间隔（分钟，默认30）
 
 alembic.ini                  # Alembic 配置（勿修改）
 auth_files/                  # 登录态存储目录
@@ -521,6 +563,110 @@ auth_files/                  # 登录态存储目录
 
 app/core/config.py           # 应用配置类
 ```
+
+### 环境变量配置详解
+
+#### 并发控制配置
+```bash
+# 最大工作进程数（同时执行的任务数）
+MAX_WORKERS=3
+# 建议值：
+# - 低配机器（4核8G）：2-3
+# - 中配机器（8核16G）：3-5
+# - 高配机器（16核32G）：5-10
+# 注意：每个进程约消耗 200-500MB 内存
+
+# 工作进程内存限制（MB）
+WORKER_MEMORY_LIMIT_MB=512
+```
+
+#### 任务调度配置
+```bash
+# 待处理任务分发间隔（分钟）
+DISPATCH_INTERVAL_MINUTES=30
+# 建议值：保持默认，任务会在进程空闲时自动分发
+
+# 失败任务重试间隔（分钟）
+RETRY_INTERVAL_MINUTES=30
+# 建议值：快速重试 5-10 分钟，正常 30 分钟，低频 60 分钟
+
+# 最大重试次数
+MAX_RETRY_COUNT=3
+# 建议值：2-5 次
+
+# 每批重试的任务数量
+RETRY_BATCH_SIZE=100
+# 建议值：任务量少 50，中等 100，大量 200-500
+```
+
+#### 智能重试配置（重要！）
+```bash
+# 失败后至少等待多久才重试（分钟）
+RETRY_MIN_WAIT_MINUTES=60
+# 建议值：根据任务总量和限流计算
+# 公式：预计全量任务耗时 × 0.8
+# 示例：1000个任务需16小时 → 设置为 800 分钟
+
+# 如果 pending 任务超过此数量，跳过重试
+RETRY_SKIP_IF_PENDING_OVER=100
+# 建议值：总任务数 × 0.1
+# 作用：优先处理新任务，避免重试任务竞争
+
+# 重试时是否遵守限流
+RETRY_RESPECT_RATE_LIMIT=true
+# 建议值：true（避免重试加重限流压力）
+```
+
+**智能重试机制**：
+- ✅ 检查 pending 队列，如果过多则延迟重试
+- ✅ 检查限流压力，如果 >80% 则跳过重试
+- ✅ 只重试失败时间超过最小等待时间的任务
+- ✅ 优先保证新任务执行，避免队列竞争
+- 📖 详细说明：`docs/smart_retry_optimization.md`
+
+#### 限流控制配置
+```bash
+# 是否启用限流
+RATE_LIMIT_ENABLED=true
+# 建议：目标网站有访问频率限制时必须启用
+
+# 时间窗口（分钟）
+RATE_LIMIT_WINDOW_MINUTES=60
+# 建议值：30-120 分钟
+
+# 时间窗口内最多执行的任务数
+RATE_LIMIT_MAX_TASKS=100
+# 建议值：根据目标网站的限制设置，通常 50-300
+
+# 是否按配置ID分别限流
+RATE_LIMIT_PER_CONFIG=false
+# true=每个配置独立计数，false=全局统一计数
+# 建议：多站点采集时设为 true
+```
+
+**限流示例**：
+- **严格限流**：`RATE_LIMIT_WINDOW_MINUTES=60, RATE_LIMIT_MAX_TASKS=50`（每小时50个任务）
+- **中等限流**：`RATE_LIMIT_WINDOW_MINUTES=60, RATE_LIMIT_MAX_TASKS=100`（每小时100个任务）
+- **宽松限流**：`RATE_LIMIT_WINDOW_MINUTES=60, RATE_LIMIT_MAX_TASKS=300`（每小时300个任务）
+
+**限流监控**：
+```bash
+# 查询限流状态
+curl http://localhost:8000/api/rate-limit/status
+
+# 查询特定配置的限流状态
+curl http://localhost:8000/api/rate-limit/status?config_id=44
+
+# 重置限流计数器（紧急情况使用）
+curl -X POST http://localhost:8000/api/rate-limit/reset
+```
+
+**重要提示**：
+- 修改 .env 文件后必须重启应用才能生效
+- 详细配置说明请参考：
+  - `docs/env_config_update.md` - 基础配置指南
+  - `docs/rate_limit_guide.md` - 限流配置详细指南
+
 
 ### 常见陷阱
 
@@ -599,6 +745,11 @@ app/core/config.py           # 应用配置类
 ### 配置指南
 - `docs/nhsa_registration_config_guide.md` - NHSA 注册证号查询配置示例
 - `docs/nhsa_registration_test_results.md` - 配置测试报告（参考数据结构）
+- `docs/package_config_update.md` - 打包版本配置更新指南（限流、重试等新配置）
+- `docs/package_config_quick_ref.md` - 打包版本配置快速参考卡片
+- `docs/env_config_update.md` - 环境变量配置更新说明
+- `docs/rate_limit_guide.md` - 限流配置详细指南
+- `docs/smart_retry_optimization.md` - 智能重试优化说明
 
 ### 设计文档
 - `docs/superpowers/specs/` - 功能设计规范

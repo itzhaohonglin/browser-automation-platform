@@ -5,6 +5,7 @@ from sqlalchemy import String, Integer, Boolean, JSON, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
+from app.core.database import ChineseJSON
 
 
 class CrawlerConfig(Base):
@@ -25,10 +26,10 @@ class CrawlerConfig(Base):
     login_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="登录页地址")
 
     # 页面交互配置
-    input_configs: Mapped[Any] = mapped_column(JSON, nullable=False, comment="多输入框配置")
+    input_configs: Mapped[Any] = mapped_column(ChineseJSON, nullable=False, comment="多输入框配置")
     submit_selector: Mapped[str] = mapped_column(String(200), nullable=False, comment="查询按钮选择器")
     wait_selector: Mapped[str] = mapped_column(String(200), nullable=False, comment="等待加载完成的选择器")
-    fields_mapping: Mapped[dict] = mapped_column(JSON, nullable=False, comment="数据提取规则")
+    fields_mapping: Mapped[dict] = mapped_column(ChineseJSON, nullable=False, comment="数据提取规则")
 
     # 分页配置
     pagination_selector: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="下一页按钮选择器")
@@ -36,14 +37,14 @@ class CrawlerConfig(Base):
 
     # 超时配置（新增）
     timeout_config: Mapped[Optional[dict]] = mapped_column(
-        JSON,
+        ChineseJSON,
         nullable=True,
         comment="超时配置 {page_load: 30000, wait_selector: 15000, ...}"
     )
 
     # 提取规则配置（新增）
     extraction_config: Mapped[Optional[dict]] = mapped_column(
-        JSON,
+        ChineseJSON,
         nullable=True,
         comment="提取规则 {filters: [...], wait_times: {...}, retry: {...}}"
     )

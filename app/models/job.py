@@ -6,6 +6,7 @@ from sqlalchemy import Integer, JSON, Text, DateTime, Index, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
+from app.core.database import ChineseJSON
 
 
 class JobStatus(str, PyEnum):
@@ -32,7 +33,7 @@ class JobQueue(Base):
     )
 
     # 任务参数
-    query_params: Mapped[dict] = mapped_column(JSON, nullable=False, comment="查询参数")
+    query_params: Mapped[dict] = mapped_column(ChineseJSON, nullable=False, comment="查询参数")
 
     # 状态字段
     status: Mapped[str] = mapped_column(

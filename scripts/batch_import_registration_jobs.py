@@ -46,12 +46,23 @@ async def import_registration_jobs(
         # 如果未指定config_id，自动查找
         if config_id is None:
             from sqlalchemy import select
+            # 先尝试按名称模糊匹配
             result = await session.execute(
                 select(CrawlerConfig)
                 .where(CrawlerConfig.config_name.like('%国家医保局%注册证号%'))
                 .order_by(CrawlerConfig.id.desc())
             )
             config = result.scalars().first()
+
+            # 如果模糊匹配失败（可能因为编码问题），使用最新的配置
+            if not config:
+                result = await session.execute(
+                    select(CrawlerConfig)
+                    .order_by(CrawlerConfig.id.desc())
+                    .limit(1)
+                )
+                config = result.scalars().first()
+
             if not config:
                 print("[ERROR] 未找到国家医保局注册证号查询配置")
                 print("\n请先运行初始化脚本：")

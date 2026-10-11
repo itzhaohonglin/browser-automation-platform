@@ -46,16 +46,38 @@ echo.
 echo 1. Open .env file in current directory
 echo 2. Modify these settings:
 echo.
+echo    ===== Required Configuration =====
+echo.
 echo    [Database] (Required - IMPORTANT: Add charset=UTF-8 for Chinese support)
 echo    DATABASE_URL=mssql+aioodbc://user:password@server:port/database?driver=ODBC+Driver+17+for+SQL+Server^&charset=UTF-8
 echo.
 echo    Example:
 echo    DATABASE_URL=mssql+aioodbc://sa:MyPassword@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server^&charset=UTF-8
 echo.
+echo    ===== Optional Configuration =====
+echo.
 echo    [Port] (Optional, default 8000)
 echo    APP_PORT=8000
-echo.
 echo    After port change, access: http://127.0.0.1:NewPort/static/index.html
+echo.
+echo    [Concurrency] (Optional, default 3)
+echo    MAX_WORKERS=3  # Number of concurrent tasks
+echo.
+echo    [Rate Limiting] (Optional but RECOMMENDED for target sites with restrictions)
+echo    RATE_LIMIT_ENABLED=true
+echo    RATE_LIMIT_WINDOW_MINUTES=60  # Time window in minutes
+echo    RATE_LIMIT_MAX_TASKS=100      # Max tasks per window
+echo.
+echo    Example: 100 tasks per hour to avoid being blocked
+echo.
+echo    [Smart Retry] (Optional, optimizes retry behavior)
+echo    RETRY_MIN_WAIT_MINUTES=60           # Min wait before retry
+echo    RETRY_SKIP_IF_PENDING_OVER=100      # Skip retry if too many pending
+echo    RETRY_RESPECT_RATE_LIMIT=true       # Respect rate limit when retrying
+echo.
+echo    For detailed configuration guide, see:
+echo    - docs/env_config_update.md
+echo    - docs/rate_limit_guide.md
 echo.
 choice /C YN /M "Configuration completed"
 if errorlevel 2 (
