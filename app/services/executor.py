@@ -35,6 +35,40 @@ TIMEOUTS = {
 class PlaywrightExecutor:
     """Playwright 浏览器自动化执行器"""
 
+    class RequestRateLimiter:
+        """请求级限流器（固定间隔）"""
+
+        def __init__(self, config: dict):
+            """
+            初始化限流器
+
+            Args:
+                config: 限流配置 {"enabled": bool, "interval_seconds": float}
+            """
+            self.enabled = config.get("enabled", False)
+            self.interval_seconds = config.get("interval_seconds", 0)
+            self.last_request_time: Optional[float] = None
+
+        async def wait_if_needed(self) -> None:
+            """如果需要，等待到下一个允许的请求时间"""
+            if not self.enabled or self.interval_seconds <= 0:
+                return
+
+            if self.last_request_time is None:
+                # 首次请求，记录时间
+                self.last_request_time = asyncio.get_event_loop().time()
+                return
+
+            # 计算需要等待的时间
+            current_time = asyncio.get_event_loop().time()
+            elapsed = current_time - self.last_request_time
+            wait_time = self.interval_seconds - elapsed
+
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+
+            self.last_request_time = asyncio.get_event_loop().time()
+
     def __init__(self, ws_manager=None):
         """
         初始化执行器
