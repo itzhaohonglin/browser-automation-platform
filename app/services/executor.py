@@ -132,6 +132,10 @@ class PlaywrightExecutor:
             "retry": {
                 "max_attempts": 2,
                 "delay_seconds": 3
+            },
+            "request_rate_limit": {
+                "enabled": False,
+                "interval_seconds": 5
             }
         }
 
@@ -148,6 +152,10 @@ class PlaywrightExecutor:
             # 合并 retry
             if "retry" in config.extraction_config:
                 extraction_config["retry"].update(config.extraction_config["retry"])
+
+            # 合并 request_rate_limit
+            if "request_rate_limit" in config.extraction_config:
+                extraction_config["request_rate_limit"].update(config.extraction_config["request_rate_limit"])
 
             self.logger.info(f"使用自定义提取配置: {config.extraction_config}")
 
@@ -1429,6 +1437,19 @@ class PlaywrightExecutor:
             # 加载动态配置
             timeouts = self._load_timeouts(config)
             extraction_cfg = self._load_extraction_config(config)
+
+            # 初始化请求级限流器
+            rate_limit_cfg = extraction_cfg.get("request_rate_limit", {})
+            if rate_limit_cfg.get("enabled", False):
+                interval = rate_limit_cfg.get("interval_seconds", 5)
+                if interval <= 0:
+                    self.logger.warning("request_rate_limit.interval_seconds 必须大于 0，已禁用限流")
+                    self._request_limiter = None
+                else:
+                    self._request_limiter = self.RequestRateLimiter(interval_seconds=interval)
+                    self.logger.info(f"[限流] 已启用请求级限流: 每 {interval} 秒一个请求")
+            else:
+                self._request_limiter = None
 
             self.logger.info(f"开始执行任务 {job_id}，配置: {config.config_name}")
 

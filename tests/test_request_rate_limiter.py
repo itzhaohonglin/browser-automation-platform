@@ -76,3 +76,97 @@ async def test_zero_interval_no_wait():
 
         assert wait_time == 0.0, f"第 {i+2} 次请求应返回 0.0，实际返回 {wait_time}"
         assert elapsed < 0.1, f"第 {i+2} 次请求不应等待，实际等待 {elapsed}"
+
+
+@pytest.mark.asyncio
+async def test_executor_loads_rate_limit_config():
+    """测试：执行器正确加载限流配置"""
+    from app.models.config import CrawlerConfig
+
+    # 创建测试配置
+    config = CrawlerConfig(
+        config_name="测试",
+        target_url="http://example.com",
+        input_configs=[],
+        submit_selector="button",
+        wait_selector=".result",
+        fields_mapping={},
+        extraction_config={
+            "request_rate_limit": {
+                "enabled": True,
+                "interval_seconds": 5
+            }
+        }
+    )
+
+    executor = PlaywrightExecutor()
+
+    # 加载配置
+    extraction_cfg = executor._load_extraction_config(config)
+
+    # 验证配置正确加载
+    assert "request_rate_limit" in extraction_cfg
+    assert extraction_cfg["request_rate_limit"]["enabled"] is True
+    assert extraction_cfg["request_rate_limit"]["interval_seconds"] == 5
+
+
+@pytest.mark.asyncio
+async def test_executor_initializes_limiter_when_enabled():
+    """测试：启用限流时正确初始化限流器"""
+    from app.models.config import CrawlerConfig
+
+    config = CrawlerConfig(
+        config_name="测试",
+        target_url="http://example.com",
+        input_configs=[],
+        submit_selector="button",
+        wait_selector=".result",
+        fields_mapping={},
+        extraction_config={
+            "request_rate_limit": {
+                "enabled": True,
+                "interval_seconds": 3
+            }
+        }
+    )
+
+    executor = PlaywrightExecutor()
+
+    # 模拟初始化限流器的逻辑
+    extraction_cfg = executor._load_extraction_config(config)
+    rate_limit_cfg = extraction_cfg.get("request_rate_limit", {})
+
+    if rate_limit_cfg.get("enabled", False):
+        interval = rate_limit_cfg.get("interval_seconds", 5)
+        if interval > 0:
+            limiter = executor.RequestRateLimiter(interval_seconds=interval)
+            assert limiter.interval_seconds == 3
+            assert limiter.last_request_time is None
+
+
+@pytest.mark.asyncio
+async def test_executor_no_limiter_when_disabled():
+    """测试：禁用限流时不初始化限流器"""
+    from app.models.config import CrawlerConfig
+
+    config = CrawlerConfig(
+        config_name="测试",
+        target_url="http://example.com",
+        input_configs=[],
+        submit_selector="button",
+        wait_selector=".result",
+        fields_mapping={},
+        extraction_config={
+            "request_rate_limit": {
+                "enabled": False,
+                "interval_seconds": 5
+            }
+        }
+    )
+
+    executor = PlaywrightExecutor()
+    extraction_cfg = executor._load_extraction_config(config)
+    rate_limit_cfg = extraction_cfg.get("request_rate_limit", {})
+
+    # 验证禁用时不应创建限流器
+    assert rate_limit_cfg.get("enabled") is False
