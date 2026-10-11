@@ -6,6 +6,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.models.job import JobQueue, JobStatus
 from app.services.alert_engine import alert_engine
@@ -18,7 +19,7 @@ class TaskScheduler:
     """任务调度器 - 负责定时补跑失败任务和评估告警规则"""
 
     # 调度配置常量
-    RETRY_INTERVAL_MINUTES = 1  # 重试间隔（分钟）
+    RETRY_INTERVAL_MINUTES = 30  # 重试间隔（分钟）- 修改为30分钟
     FIRST_RUN_DELAY_MINUTES = 1  # 首次运行延迟（分钟）
     MAX_RETRY_COUNT = 3  # 最大重试次数
     BATCH_SIZE = 100  # 每批处理的任务数量
@@ -71,7 +72,7 @@ class TaskScheduler:
         # 添加定时任务：分发待处理任务
         self.scheduler.add_job(
             func=self.dispatch_pending_jobs,
-            trigger=IntervalTrigger(seconds=10),
+            trigger=IntervalTrigger(minutes=settings.DISPATCH_INTERVAL_MINUTES),
             id='dispatch_pending_jobs',
             name='分发待处理任务',
             next_run_time=datetime.now() + timedelta(seconds=5)

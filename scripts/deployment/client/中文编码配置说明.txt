@@ -1,0 +1,77 @@
+====================================
+  中文编码配置 - 重要提示
+====================================
+
+问题：数据库中的中文显示为乱码或 ASCII 转义字符
+
+解决方案：两个关键配置
+
+------------------------------------
+1. 修改 .env 文件
+------------------------------------
+
+在 DATABASE_URL 末尾添加 &charset=UTF-8
+
+错误示例❌：
+DATABASE_URL=mssql+aioodbc://sa:Pass@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server
+
+正确示例✅：
+DATABASE_URL=mssql+aioodbc://sa:Pass@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server&charset=UTF-8
+                                                                                            ^^^^^^^^^^^^^^^^
+                                                                                            必须添加这个！
+
+------------------------------------
+2. 创建数据库时指定字符集
+------------------------------------
+
+在 SQL Server 中执行（创建数据库前）：
+
+CREATE DATABASE bap COLLATE Chinese_PRC_CI_AS;
+                             ^^^^^^^^^^^^^^^^
+                             必须指定这个！
+
+或使用 sqlcmd 命令：
+sqlcmd -S localhost -U sa -P YourPassword -Q "CREATE DATABASE bap COLLATE Chinese_PRC_CI_AS;"
+
+====================================
+验证方法
+====================================
+
+1. 修改 .env 文件（添加 &charset=UTF-8）
+2. 重启服务（关闭后运行 startup.bat）
+3. 测试插入中文数据
+4. 检查是否正常显示
+
+====================================
+常见错误
+====================================
+
+❌ 只修改了 .env，没有指定数据库 COLLATE
+   → 部分中文可能还是乱码
+
+❌ 只指定了数据库 COLLATE，没有修改 .env
+   → 写入时中文被错误编码
+
+❌ 数据库已创建但没有指定 COLLATE
+   → 需要删除数据库重建，或执行迁移脚本
+
+====================================
+已有数据库的处理
+====================================
+
+如果数据库已创建但没有指定 COLLATE：
+
+方式 1：删除重建（数据会丢失）
+  DROP DATABASE bap;
+  CREATE DATABASE bap COLLATE Chinese_PRC_CI_AS;
+  运行 init_database.bat 重新初始化
+
+方式 2：执行迁移（保留数据结构）
+  运行主程序的迁移命令（自动将 VARCHAR 改为 NVARCHAR）
+
+====================================
+需要帮助？
+====================================
+
+详细文档：docs/FIX_CHINESE_ENCODING.md
+部署指南：docs/deployment_windows.md

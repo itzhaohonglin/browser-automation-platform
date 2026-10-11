@@ -88,9 +88,9 @@ def upgrade() -> None:
     sa.Column('metric_value', sa.Float(), nullable=False, comment='触发时指标值'),
     sa.Column('notify_status', sa.String(length=20), nullable=False, comment='通知状态'),
     sa.Column('notify_error', sa.Text(), nullable=True, comment='通知错误信息'),
-    sa.ForeignKeyConstraint(['rule_id'], ['alert_rules.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index('idx_rule_id', 'alert_history', ['rule_id'], unique=False)
     op.create_table('job_queue',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('config_id', sa.Integer(), nullable=False, comment='关联crawler_configs.id'),
@@ -101,7 +101,6 @@ def upgrade() -> None:
     sa.Column('error_msg', sa.Text(), nullable=True, comment='错误信息'),
     sa.Column('created_at', sa.DateTime(), nullable=False, comment='创建时间'),
     sa.Column('updated_at', sa.DateTime(), nullable=False, comment='更新时间'),
-    sa.ForeignKeyConstraint(['config_id'], ['crawler_configs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('idx_config_status', 'job_queue', ['config_id', 'status'], unique=False)
@@ -113,10 +112,10 @@ def upgrade() -> None:
     sa.Column('extracted_data', sa.JSON(), nullable=False, comment='提取的业务数据'),
     sa.Column('page_count', sa.Integer(), nullable=False, comment='实际抓取页数'),
     sa.Column('created_at', sa.DateTime(), nullable=False, comment='创建时间'),
-    sa.ForeignKeyConstraint(['job_id'], ['job_queue.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('idx_job', 'crawler_results', ['job_id'], unique=False)
+    op.create_index('idx_config', 'crawler_results', ['config_id'], unique=False)
     # ### end Alembic commands ###
 
 

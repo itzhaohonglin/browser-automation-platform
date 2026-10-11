@@ -40,7 +40,7 @@ async def init_nhsa_registration_config():
         # 输入配置（注册证号查询）
         input_configs=[
             {
-                "selector": "input[name='zczbh']",  # 注册证号输入框
+                "selector": "input[name='regcardNm']",  # 注册证号输入框
                 "param_name": "registration_no",
                 "label": "注册证号",
                 "required": True
@@ -148,16 +148,16 @@ async def init_nhsa_registration_config():
     )
 
     async with get_session() as session:
-        # 创建配置
+        # 创建配置（不指定外键关系，让数据库自动管理）
         session.add(config)
         await session.commit()
         await session.refresh(config)
 
-        print(f"\n✓ 配置已创建，ID: {config.id}")
+        print(f"\n[OK] 配置已创建，ID: {config.id}")
 
-        # 创建测试任务
+        # 创建测试任务（使用已创建的config.id，不依赖外键约束）
         test_job = JobQueue(
-            config_id=config.id,
+            config_id=config.id,  # 引用已存在的配置ID
             query_params={
                 "registration_no": "滇械注准20192140008"
             }
@@ -166,7 +166,7 @@ async def init_nhsa_registration_config():
         await session.commit()
         await session.refresh(test_job)
 
-        print(f"✓ 测试任务已创建，ID: {test_job.id}")
+        print(f"[OK] 测试任务已创建，ID: {test_job.id}")
 
         print("\n" + "="*80)
         print("配置详情")
@@ -174,7 +174,7 @@ async def init_nhsa_registration_config():
         print(f"配置名称: {config.config_name}")
         print(f"查询方式: 注册证号查询")
         print(f"测试参数: registration_no=滇械注准20192140008")
-        print(f"详情采集: ✓ 已启用")
+        print(f"详情采集: [OK] 已启用")
         print(f"列表字段: {len(config.fields_mapping['fields'])} 个")
         print(f"详情字段: {len(config.fields_mapping['detail_config']['fields'])} 个")
 

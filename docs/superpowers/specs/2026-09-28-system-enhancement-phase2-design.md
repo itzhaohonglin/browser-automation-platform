@@ -2087,7 +2087,7 @@ def downgrade():
 ```python
 # 确保 Windows 使用正确的事件循环策略
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 ```
 
 **数据库兼容性：**

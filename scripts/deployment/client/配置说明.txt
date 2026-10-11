@@ -1,0 +1,247 @@
+====================================
+  配置文件说明 (.env)
+====================================
+
+本文件用于配置浏览器自动化平台的运行参数。
+所有配置项均可通过编辑此文件进行修改，无需修改程序代码。
+
+====================================
+必填配置项
+====================================
+
+【DATABASE_URL】数据库连接字符串
+  说明：SQL Server 数据库的完整连接信息
+  格式：mssql+aioodbc://用户名:密码@服务器:端口/数据库?driver=驱动名称
+
+  示例1（本地数据库）：
+  DATABASE_URL=mssql+aioodbc://sa:MyPassword123@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server
+
+  示例2（远程数据库）：
+  DATABASE_URL=mssql+aioodbc://dbuser:SecurePass@192.168.1.100:1433/bap?driver=ODBC+Driver+17+for+SQL+Server
+
+  注意事项：
+  - 密码中的特殊字符需要 URL 编码：
+    @ 编码为 %40
+    # 编码为 %23
+    % 编码为 %25
+    空格 编码为 %20
+  - 数据库必须提前创建：
+    CREATE DATABASE bap COLLATE Chinese_PRC_CI_AS;
+  - 需要安装 ODBC Driver 17 for SQL Server
+
+====================================
+常用配置项
+====================================
+
+【APP_PORT】服务端口
+  说明：Web 服务监听的端口号
+  默认值：8000
+  取值范围：1024-65535
+
+  示例：
+  APP_PORT=8000          # 访问 http://127.0.0.1:8000
+  APP_PORT=9000          # 访问 http://127.0.0.1:9000
+
+  修改后需要：
+  1. 重启服务
+  2. 使用新端口访问系统
+
+【APP_HOST】服务监听地址
+  说明：Web 服务绑定的 IP 地址
+  默认值：0.0.0.0（监听所有网卡）
+
+  示例：
+  APP_HOST=0.0.0.0       # 允许外部访问
+  APP_HOST=127.0.0.1     # 仅允许本机访问
+
+【HEADLESS_MODE】无头模式
+  说明：浏览器是否在后台运行（不显示窗口）
+  默认值：true
+  可选值：true / false
+
+  示例：
+  HEADLESS_MODE=true     # 后台运行（生产环境推荐）
+  HEADLESS_MODE=false    # 显示浏览器窗口（调试时使用）
+
+【DEBUG】调试模式
+  说明：是否启用调试模式（显示详细日志和错误信息）
+  默认值：false
+  可选值：true / false
+
+  示例：
+  DEBUG=false            # 生产环境
+  DEBUG=true             # 开发调试
+
+【LOG_LEVEL】日志级别
+  说明：控制日志输出的详细程度
+  默认值：INFO
+  可选值：DEBUG | INFO | WARNING | ERROR
+
+  示例：
+  LOG_LEVEL=INFO         # 常规日志
+  LOG_LEVEL=DEBUG        # 详细调试日志
+  LOG_LEVEL=ERROR        # 仅错误日志
+
+【LOG_FILE】日志文件路径
+  说明：日志保存的文件路径（可选）
+  默认值：不设置（仅输出到控制台）
+
+  示例：
+  LOG_FILE=logs/app.log  # 保存到文件
+
+====================================
+高级配置项
+====================================
+
+【AUTH_FILES_DIR】登录态存储目录
+  说明：浏览器登录态文件的保存位置
+  默认值：auth_files
+  通常无需修改
+
+【SMTP_HOST】邮件服务器地址
+  说明：用于发送告警邮件的 SMTP 服务器
+  示例：smtp.qq.com
+
+【SMTP_PORT】邮件服务器端口
+  说明：SMTP 服务器端口
+  常用值：587（TLS）、465（SSL）、25（无加密）
+
+【SMTP_USE_TLS】是否使用 TLS
+  说明：SMTP 连接是否使用 TLS 加密
+  可选值：true / false
+
+【SMTP_USER】邮件账号
+【SMTP_PASSWORD】邮件密码
+【ALERT_EMAIL_FROM】发件人地址
+【ALERT_EMAIL_TO】收件人地址
+
+【DINGTALK_WEBHOOK_URL】钉钉机器人
+  说明：钉钉群机器人的 Webhook 地址
+  示例：https://oapi.dingtalk.com/robot/send?access_token=xxxxx
+
+【WECOM_WEBHOOK_URL】企业微信机器人
+  说明：企业微信群机器人的 Webhook 地址
+  示例：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxx
+
+====================================
+配置示例（完整）
+====================================
+
+# 数据库连接（必填）
+DATABASE_URL=mssql+aioodbc://sa:MyPassword123@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server
+
+# 服务配置
+APP_HOST=0.0.0.0
+APP_PORT=8000
+DEBUG=false
+
+# 浏览器配置
+HEADLESS_MODE=true
+
+# 日志配置
+LOG_LEVEL=INFO
+LOG_FILE=logs/app.log
+
+# 登录态目录
+AUTH_FILES_DIR=auth_files
+
+# 告警配置（可选）
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=587
+SMTP_USE_TLS=true
+SMTP_USER=alert@example.com
+SMTP_PASSWORD=your_password
+ALERT_EMAIL_FROM=alert@example.com
+ALERT_EMAIL_TO=admin@example.com
+
+====================================
+常见配置场景
+====================================
+
+【场景1：修改服务端口】
+  需求：将默认端口 8000 改为 9000
+
+  修改：
+  APP_PORT=9000
+
+  结果：
+  访问地址变为 http://127.0.0.1:9000/static/index.html
+
+【场景2：启用调试模式】
+  需求：查看详细的执行日志
+
+  修改：
+  DEBUG=true
+  LOG_LEVEL=DEBUG
+  HEADLESS_MODE=false
+
+  结果：
+  - 显示详细日志
+  - 浏览器窗口可见
+  - API 错误信息详细
+
+【场景3：连接远程数据库】
+  需求：连接到 192.168.1.100 的数据库
+
+  修改：
+  DATABASE_URL=mssql+aioodbc://dbuser:Pass123@192.168.1.100:1433/bap?driver=ODBC+Driver+17+for+SQL+Server
+
+  前提：
+  - 远程数据库已开放 1433 端口
+  - 已创建数据库账号 dbuser
+  - 防火墙已允许连接
+
+【场景4：仅本机访问】
+  需求：禁止其他电脑访问此服务
+
+  修改：
+  APP_HOST=127.0.0.1
+
+  结果：
+  只能通过 http://127.0.0.1:8000 访问
+  其他电脑无法访问
+
+====================================
+配置验证
+====================================
+
+修改配置后，请验证：
+
+1. 数据库连接
+   方法：启动服务，查看是否有数据库连接错误
+
+2. 端口占用
+   方法：netstat -ano | findstr ":端口号"
+   确保端口未被其他程序占用
+
+3. 访问地址
+   方法：浏览器访问 http://127.0.0.1:端口/health
+   返回 {"status": "healthy"} 表示正常
+
+====================================
+故障排查
+====================================
+
+Q1: 修改配置后不生效？
+A1: 必须重启服务（Ctrl+C 停止后重新运行 startup.bat）
+
+Q2: 提示数据库连接失败？
+A2: 检查：
+    - DATABASE_URL 格式是否正确
+    - 数据库服务是否运行
+    - 用户名密码是否正确
+    - 数据库是否已创建
+    - ODBC 驱动是否已安装
+
+Q3: 修改端口后无法访问？
+A3: 检查：
+    - 新端口是否被其他程序占用
+    - 防火墙是否拦截新端口
+    - 访问地址是否使用了新端口
+
+Q4: 密码包含特殊字符怎么办？
+A4: 使用 URL 编码：
+    原密码：P@ss#123
+    编码后：P%40ss%23123
+
+====================================

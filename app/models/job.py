@@ -2,7 +2,7 @@
 from datetime import datetime
 from enum import Enum as PyEnum
 from typing import Optional
-from sqlalchemy import Integer, JSON, Text, DateTime, ForeignKey, Index, Enum as SQLEnum
+from sqlalchemy import Integer, JSON, Text, DateTime, Index, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -24,10 +24,9 @@ class JobQueue(Base):
     # 主键
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # 外键
+    # 关联字段（不使用外键约束）
     config_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("crawler_configs.id"),
         nullable=False,
         comment="关联crawler_configs.id"
     )
@@ -66,12 +65,19 @@ class JobQueue(Base):
         comment="更新时间"
     )
 
-    # 关系定义
-    config: Mapped["CrawlerConfig"] = relationship("CrawlerConfig", back_populates="jobs")
+    # 关系定义（仅用于 ORM，指定外键字段）
+    config: Mapped["CrawlerConfig"] = relationship(
+        "CrawlerConfig",
+        back_populates="jobs",
+        foreign_keys=[config_id],
+        primaryjoin="JobQueue.config_id == CrawlerConfig.id"
+    )
     results: Mapped[list["CrawlerResult"]] = relationship(
         "CrawlerResult",
         back_populates="job",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        foreign_keys="CrawlerResult.job_id",
+        primaryjoin="JobQueue.id == CrawlerResult.job_id"
     )
 
     # 索引

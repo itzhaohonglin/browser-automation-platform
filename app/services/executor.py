@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sys
 import time
 from typing import Optional, Dict, List, Tuple, Literal, Union
 from datetime import datetime
@@ -14,6 +15,10 @@ from app.models.job import JobQueue, JobStatus
 from app.models.config import CrawlerConfig
 from app.models.result import CrawlerResult
 from app.services.metrics_collector import metrics_collector
+
+# Windows 平台设置事件循环策略（必须在使用 Playwright 之前设置）
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -336,6 +341,13 @@ class PlaywrightExecutor:
             self.logger.info(f"填充字段: {selector} = {value} (类型: {input_type})")
 
             try:
+                # 先等待元素可见和可交互
+                await page.wait_for_selector(selector, state='visible', timeout=timeouts['wait_selector'])
+                self.logger.debug(f"元素 {selector} 已可见")
+
+                # 再等待一小段时间确保元素完全加载（iframe 内的元素可能需要额外时间）
+                await asyncio.sleep(0.5)
+
                 if input_type == 'text' or input_type == 'fill':
                     await page.fill(selector, value, timeout=timeouts['click'])
                 elif input_type == 'select':
@@ -583,7 +595,7 @@ class PlaywrightExecutor:
         detail_button: Locator,
         detail_config: Dict,
         row_index: int
-    ) -> Tuple[Dict, str, Optional[str]]:
+    ) -> Tuple[Union[Dict, List[Dict]], str, Optional[str]]:
         """
         提取单条数据的详情
 
@@ -595,7 +607,7 @@ class PlaywrightExecutor:
 
         Returns:
             (detail_data, status, error_msg)
-            - detail_data: 提取的详情字典
+            - detail_data: 提取的详情字典或字典列表（如果是detail_list_mode）
             - status: "success"/"failed"
             - error_msg: 失败时的错误信息
         """
@@ -646,45 +658,170 @@ class PlaywrightExecutor:
             # 额外等待确保数据完全加载
             await asyncio.sleep(1)
 
-            # 4. 提取详情字段
-            detail_fields = detail_config['fields']
-            self.logger.info(f"[详情] 提取 {len(detail_fields)} 个详情字段")
+            # 4. 检查是否为列表模式（详情中包含多条记录）
+            detail_list_mode = detail_config.get('detail_list_mode', False)
+            detail_data = None
 
-            # 使用浏览器端JavaScript一次性提取所有字段
-            detail_data = await detail_frame.evaluate("""
-                (fields) => {
-                    const result = {};
+            if detail_list_mode:
+                # 列表模式：提取详情iframe中的所有行（支持分页）
+                self.logger.info(f"[详情] 列表模式：提取详情列表数据")
 
-                    for (const field of fields) {
-                        const {name, selector, attr} = field;
-                        let value = '';
-
-                        try {
-                            const element = document.querySelector(selector);
-
-                            if (element) {
-                                if (attr === 'text') {
-                                    value = element.innerText || element.textContent || '';
-                                } else if (attr === 'href' || attr === 'src') {
-                                    value = element.getAttribute(attr) || '';
-                                } else {
-                                    value = element.getAttribute(attr) || '';
-                                }
-
-                                value = value.trim();
+                # 重要：重置jqGrid到第1页（避免保留之前的页码状态）
+                try:
+                    await detail_frame.evaluate("""
+                        () => {
+                            const grid = jQuery('table.ui-jqgrid-btable:first')[0];
+                            if (grid && grid.id) {
+                                const gridId = grid.id;
+                                jQuery('#' + gridId).jqGrid('setGridParam', {page: 1}).trigger('reloadGrid');
                             }
-                        } catch (e) {
-                            console.error(`提取字段 ${name} 失败:`, e);
+                        }
+                    """)
+                    self.logger.info("[详情] 已重置jqGrid到第1页")
+                    await asyncio.sleep(2)  # 等待重置完成
+                except Exception as e:
+                    self.logger.warning(f"[详情] 重置jqGrid失败: {e}")
+
+                detail_list_selector = detail_config.get('detail_list_selector', 'tbody tr.jqgrow')
+                detail_fields = detail_config['fields']
+                detail_pagination_selector = detail_config.get('detail_pagination_selector')
+
+                all_detail_items = []
+                detail_page = 1
+                max_detail_pages = detail_config.get('max_detail_pages', 10)
+
+                # 循环提取每一页的详情数据
+                while detail_page <= max_detail_pages:
+                    # 等待当前页数据加载（智能等待：如果0行则重试）
+                    detail_rows = detail_frame.locator(detail_list_selector)
+                    row_count = 0
+
+                    # 最多等待5次，每次2秒（总共10秒）
+                    for wait_attempt in range(5):
+                        await asyncio.sleep(2)
+                        row_count = await detail_rows.count()
+
+                        if row_count > 0:
+                            self.logger.info(f"[详情] 第 {detail_page} 页，行数: {row_count}（等待 {(wait_attempt+1)*2}s 后加载完成）")
+                            break
+                        else:
+                            self.logger.debug(f"[详情] 第 {detail_page} 页，等待 {(wait_attempt+1)*2}s 后仍为0行，继续等待...")
+
+                    # 如果等待5次后仍然是0行，则停止
+                    if row_count == 0:
+                        self.logger.warning(f"[详情] 第 {detail_page} 页等待10秒后仍为空，停止翻页")
+                        break
+
+                    # 提取当前页所有行的数据
+                    page_items = await detail_rows.evaluate_all("""
+                        (rows, fields) => {
+                            return rows.map(row => {
+                                const result = {};
+                                for (const field of fields) {
+                                    const {name, selector, attr} = field;
+                                    let value = '';
+                                    try {
+                                        const element = row.querySelector(selector);
+                                        if (element) {
+                                            if (attr === 'text') {
+                                                value = element.innerText || element.textContent || '';
+                                            } else {
+                                                value = element.getAttribute(attr) || '';
+                                            }
+                                            value = value.trim();
+                                        }
+                                    } catch (e) {
+                                        console.error(`提取字段 ${name} 失败:`, e);
+                                    }
+                                    result[name] = value;
+                                }
+                                return result;
+                            });
+                        }
+                    """, detail_fields)
+
+                    all_detail_items.extend(page_items)
+                    self.logger.info(f"[详情] 第 {detail_page} 页提取 {len(page_items)} 条记录，累计 {len(all_detail_items)} 条")
+
+                    # 检查是否有下一页（核心逻辑：只依赖按钮状态）
+                    if not detail_pagination_selector:
+                        self.logger.info("[详情] 未配置分页选择器，停止翻页")
+                        break
+
+                    # 检查"下一页"按钮状态
+                    button_disabled = await detail_frame.evaluate(f"""
+                        () => {{
+                            const btn = document.querySelector('{detail_pagination_selector}');
+                            if (!btn) return true;
+                            return btn.classList.contains('ui-state-disabled');
+                        }}
+                    """)
+
+                    if button_disabled:
+                        self.logger.info("[详情] 下一页按钮已禁用，已到最后一页")
+                        break
+
+                    # 使用jqGrid API翻页
+                    try:
+                        self.logger.info("[详情] 点击下一页")
+                        await detail_frame.evaluate("""
+                            () => {
+                                const grid = jQuery('table.ui-jqgrid-btable:first')[0];
+                                if (grid && grid.id) {
+                                    const currentPage = jQuery('#' + grid.id).jqGrid('getGridParam', 'page');
+                                    jQuery('#' + grid.id).jqGrid('setGridParam', {page: currentPage + 1}).trigger('reloadGrid');
+                                }
+                            }
+                        """)
+                        await asyncio.sleep(3)  # 等待AJAX加载
+                        detail_page += 1
+                    except Exception as e:
+                        self.logger.warning(f"[详情] 翻页失败: {e}")
+                        break
+
+                detail_data = all_detail_items
+                self.logger.info(f"[详情] 第 {row_index + 1} 条：共提取了 {len(all_detail_items)} 条详情记录（{detail_page} 页）")
+
+            else:
+                # 单条模式：提取详情字段
+                detail_fields = detail_config['fields']
+                self.logger.info(f"[详情] 单条模式：提取 {len(detail_fields)} 个详情字段")
+
+                # 使用浏览器端JavaScript一次性提取所有字段
+                detail_data = await detail_frame.evaluate("""
+                    (fields) => {
+                        const result = {};
+
+                        for (const field of fields) {
+                            const {name, selector, attr} = field;
+                            let value = '';
+
+                            try {
+                                const element = document.querySelector(selector);
+
+                                if (element) {
+                                    if (attr === 'text') {
+                                        value = element.innerText || element.textContent || '';
+                                    } else if (attr === 'href' || attr === 'src') {
+                                        value = element.getAttribute(attr) || '';
+                                    } else {
+                                        value = element.getAttribute(attr) || '';
+                                    }
+
+                                    value = value.trim();
+                                }
+                            } catch (e) {
+                                console.error(`提取字段 ${name} 失败:`, e);
+                            }
+
+                            result[name] = value;
                         }
 
-                        result[name] = value;
+                        return result;
                     }
+                """, detail_fields)
 
-                    return result;
-                }
-            """, detail_fields)
-
-            self.logger.info(f"[详情] 第 {row_index + 1} 条提取完成，字段数: {len(detail_data)}")
+                self.logger.info(f"[详情] 第 {row_index + 1} 条提取完成，字段数: {len(detail_data)}")
 
             # 5. 关闭详情（失败不影响数据返回）
             try:
@@ -693,33 +830,59 @@ class PlaywrightExecutor:
                 close_timeout = detail_config.get('timeout', {}).get('close', 5000)
 
                 if close_method == 'click' and close_selector:
-                    # 点击关闭按钮
+                    # 点击关闭按钮（在主frame中查找）
                     self.logger.info(f"[详情] 点击关闭按钮: {close_selector}")
-                    await detail_frame.click(close_selector, timeout=close_timeout)
+                    await main_page.click(close_selector, timeout=close_timeout)
                 elif close_method == 'escape':
-                    # 按ESC键
+                    # 按ESC键（使用page对象）
                     self.logger.info(f"[详情] 按ESC键关闭")
-                    await detail_frame.keyboard.press('Escape')
+                    await main_page.page.keyboard.press('Escape')
                 elif close_method == 'auto':
                     # 自动选择：优先点击，失败则ESC
                     if close_selector:
                         try:
-                            await detail_frame.click(close_selector, timeout=close_timeout)
+                            await main_page.click(close_selector, timeout=close_timeout)
                         except Exception as e:
                             self.logger.info(f"[详情] 关闭按钮点击失败 ({e})，改用ESC键")
-                            await detail_frame.keyboard.press('Escape')
+                            await main_page.page.keyboard.press('Escape')
                     else:
-                        await detail_frame.keyboard.press('Escape')
+                        await main_page.page.keyboard.press('Escape')
 
-                # 6. 等待返回列表页
-                await asyncio.sleep(0.5)
+                # 6. 等待返回列表页并验证iframe完全消失（最多尝试5次）
+                iframe_closed = False
+                for close_attempt in range(5):
+                    await asyncio.sleep(1)
+
+                    try:
+                        iframe_count = await main_page.locator('iframe.artDialog-iframe').count()
+
+                        if iframe_count == 0:
+                            self.logger.info(f"[详情] iframe已完全关闭（等待 {close_attempt+1}s）")
+                            iframe_closed = True
+                            break
+                        else:
+                            self.logger.warning(f"[详情] 等待 {close_attempt+1}s 后仍有 {iframe_count} 个iframe，继续等待...")
+
+                            # 如果第3秒还在，再按一次ESC
+                            if close_attempt == 2:
+                                self.logger.info(f"[详情] 再次按ESC键强制关闭")
+                                await main_page.page.keyboard.press('Escape')
+                    except Exception as e:
+                        self.logger.debug(f"[详情] 验证iframe关闭时出错: {e}")
+                        break
+
+                if not iframe_closed:
+                    self.logger.error(f"[详情] 等待5秒后iframe仍未关闭，可能影响下一条详情提取")
+
+                # 额外等待1秒确保DOM稳定
+                await asyncio.sleep(1)
 
             except Exception as e:
                 self.logger.warning(f"[详情] 关闭操作失败，但数据已提取: {e}")
                 # 尝试强制ESC作为后备
                 try:
-                    await detail_frame.keyboard.press('Escape')
-                    await asyncio.sleep(0.5)
+                    await main_page.page.keyboard.press('Escape')
+                    await asyncio.sleep(2)
                 except:
                     pass
 
@@ -1265,21 +1428,113 @@ class PlaywrightExecutor:
             await page.goto(config.target_url, timeout=timeouts['page_load'], wait_until='networkidle')
             self.logger.info(f"访问目标 URL: {config.target_url}")
 
-            # 等待页面完全加载（iframe 内容可能需要额外时间渲染）
-            await asyncio.sleep(10)
-            await self._broadcast_log("info", "页面加载完成，检测 iframe...")
+            # 等待页面完全加载
+            await asyncio.sleep(3)
+            await self._broadcast_log("info", "页面加载完成")
 
-            # 5. 检测 iframe 并选择正确的操作上下文
-            target_frame = page
+            # 5. 确定操作目标 frame（表单填充和提交）
+            operation_frame = page
 
             # 检查是否配置了多层iframe
             iframe_levels = 0
             if isinstance(config.fields_mapping, dict):
                 iframe_levels = config.fields_mapping.get('iframe_levels', 0)
 
-            if iframe_levels >= 2:
-                # 处理多层嵌套iframe（医保局等复杂页面）
-                self.logger.info(f"检测到多层iframe配置，层数: {iframe_levels}")
+            # 首先尝试在主页面查找输入框
+            first_input_selector = None
+            if config.input_configs:
+                inputs = config.input_configs.get('inputs', config.input_configs) if isinstance(config.input_configs, dict) else config.input_configs
+                if inputs and len(inputs) > 0:
+                    first_input_selector = inputs[0].get('selector')
+
+            # 智能检测：输入框在主页面还是iframe中
+            input_in_main_page = False
+            if first_input_selector:
+                try:
+                    # 尝试在主页面查找
+                    main_input = await page.query_selector(first_input_selector)
+                    if main_input and await main_input.is_visible():
+                        input_in_main_page = True
+                        self.logger.info(f"输入框在主页面")
+                except:
+                    pass
+
+            if not input_in_main_page and iframe_levels >= 2:
+                # 输入框在iframe中，需要先进入iframe
+                self.logger.info(f"输入框可能在iframe中，先进入iframe")
+                await self._broadcast_log("info", f"处理{iframe_levels}层嵌套iframe...")
+
+                try:
+                    # 获取第1层iframe选择器
+                    iframe1_selector = config.fields_mapping.get('iframe1_selector')
+                    if iframe1_selector:
+                        self.logger.info(f"等待第1层iframe: {iframe1_selector}")
+                        iframe1_element = await page.wait_for_selector(iframe1_selector, timeout=timeouts['wait_selector'])
+                        iframe1 = await iframe1_element.content_frame()
+
+                        if not iframe1:
+                            raise Exception("无法获取第1层iframe")
+
+                        self.logger.info("成功进入第1层iframe")
+                        await self._broadcast_log("info", "进入第1层iframe")
+
+                        # 等待第1层iframe加载
+                        await iframe1.wait_for_load_state("networkidle", timeout=10000)
+                        await asyncio.sleep(2)
+
+                        # 获取第2层iframe选择器
+                        iframe2_selector = config.fields_mapping.get('iframe2_selector')
+                        if iframe2_selector:
+                            self.logger.info(f"等待第2层iframe: {iframe2_selector}")
+                            iframe2_element = await iframe1.wait_for_selector(iframe2_selector, timeout=timeouts['wait_selector'])
+                            iframe2 = await iframe2_element.content_frame()
+
+                            if not iframe2:
+                                raise Exception("无法获取第2层iframe")
+
+                            self.logger.info("成功进入第2层iframe")
+                            await self._broadcast_log("info", "进入第2层iframe")
+
+                            # 等待第2层iframe加载
+                            await iframe2.wait_for_load_state("networkidle", timeout=10000)
+                            await asyncio.sleep(2)
+
+                            operation_frame = iframe2
+                            # 在 Frame 上注册控制台监听
+                            operation_frame.on("console", handle_console)
+                            await self._broadcast_log("success", "成功定位到目标iframe")
+                        else:
+                            operation_frame = iframe1
+                    else:
+                        self.logger.warning("未配置iframe1_selector")
+
+                except Exception as e:
+                    self.logger.error(f"多层iframe处理失败: {e}")
+                    await self._broadcast_log("error", f"iframe处理失败: {e}")
+                    raise
+
+            # 6. 填充表单（在 operation_frame 中）
+            if config.input_configs:
+                inputs = config.input_configs.get('inputs', config.input_configs) if isinstance(config.input_configs, dict) else config.input_configs
+                await self._fill_form(operation_frame, inputs, job.query_params, timeouts)
+                await self._broadcast_log("info", "表单填充完成")
+
+            # 7. 点击提交按钮（在 operation_frame 中）
+            self.logger.info(f"点击提交按钮: {config.submit_selector}")
+            await operation_frame.click(config.submit_selector, timeout=timeouts['click'])
+            await self._broadcast_log("info", "点击提交按钮")
+
+            # 8. 等待结果加载
+            self.logger.info(f"等待结果加载: {config.wait_selector}")
+            await asyncio.sleep(3)
+
+            # 9. 确定数据提取目标 frame（如果已经进入iframe操作，则使用相同frame）
+            target_frame = operation_frame
+
+            # 如果操作在主页面进行（input_in_main_page=True），但数据在iframe中
+            # 需要进入iframe进行数据提取
+            if input_in_main_page and iframe_levels >= 2:
+                self.logger.info("操作在主页面，但数据在iframe中，现在进入iframe提取数据")
                 await self._broadcast_log("info", f"处理{iframe_levels}层嵌套iframe...")
 
                 try:
@@ -1324,7 +1579,7 @@ class PlaywrightExecutor:
                         else:
                             target_frame = iframe1
                     else:
-                        self.logger.warning("未配置iframe1_selector，将使用自动检测")
+                        self.logger.warning("未配置iframe1_selector")
 
                 except Exception as e:
                     self.logger.error(f"多层iframe处理失败: {e}")
@@ -1332,31 +1587,22 @@ class PlaywrightExecutor:
                     raise
 
             # 如果没有配置多层iframe，使用原有的自动检测逻辑
-            elif target_frame == page:
+            if target_frame == page and not input_in_main_page:
                 frames = page.frames
                 self.logger.info(f"检测到 {len(frames)} 个 frame")
                 await self._broadcast_log("info", f"检测到 {len(frames)} 个 frame")
 
                 if len(frames) > 1:
-                    # 尝试在每个 frame 中查找可见的输入框
+                    # 尝试在每个 frame 中查找数据表格
+                    table_selector = config.fields_mapping.get('list_selector', 'table') if isinstance(config.fields_mapping, dict) else 'table'
                     for idx, frame in enumerate(frames):
                         try:
                             self.logger.info(f"检查 Frame {idx}: {frame.url}")
-                            # 检查是否有可见输入框
-                            inputs = await frame.query_selector_all('input')
-                            self.logger.info(f"Frame {idx} 找到 {len(inputs)} 个输入框")
+                            # 检查是否有数据表格
+                            tables = await frame.query_selector_all(table_selector)
+                            self.logger.info(f"Frame {idx} 找到 {len(tables)} 个表格")
 
-                            visible_inputs = []
-                            for inp in inputs:
-                                try:
-                                    if await inp.is_visible():
-                                        visible_inputs.append(inp)
-                                except:
-                                    pass
-
-                            self.logger.info(f"Frame {idx} 有 {len(visible_inputs)} 个可见输入框")
-
-                            if len(visible_inputs) > 0:
+                            if len(tables) > 0:
                                 self.logger.info(f"选择 Frame {idx} ({frame.url})")
                                 target_frame = frame
                                 # 在 Frame 上也注册控制台监听
@@ -1371,31 +1617,21 @@ class PlaywrightExecutor:
                 self.logger.info("使用主页面（未找到合适的 iframe）")
                 await self._broadcast_log("info", "使用主页面")
 
-            # 6. 填充表单
-            if config.input_configs:
-                # 提取 inputs 列表（兼容新旧格式）
-                inputs = config.input_configs.get('inputs', config.input_configs) if isinstance(config.input_configs, dict) else config.input_configs
-                await self._fill_form(target_frame, inputs, job.query_params, timeouts)
-                # 节点 3: 表单填充完成
-                await self._broadcast_log("info", "表单填充完成")
+            # 9. 等待结果数据在 target_frame 中加载
+            self.logger.info(f"等待结果数据: {config.wait_selector}")
 
-            # 7. 点击提交按钮
-            self.logger.info(f"点击提交按钮: {config.submit_selector}")
-            await target_frame.click(config.submit_selector, timeout=timeouts['click'])
-
-            # 节点 4: 提交按钮点击
-            await self._broadcast_log("info", "点击提交按钮")
-
-            # 8. 等待结果加载
-            self.logger.info(f"等待结果加载: {config.wait_selector}")
+            # 先等待表格元素存在于DOM中（不要求visible，因为可能一开始是hidden）
             await target_frame.wait_for_selector(
                 config.wait_selector,
-                state="visible",
+                state="attached",
                 timeout=timeouts['wait_selector']
             )
+            self.logger.info(f"表格元素已存在于DOM")
 
             # 额外等待确保数据完全加载（特别是动态渲染的内容）
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
+
+            # 10. 提取数据
 
             # 尝试等待真实的数据行（包含编码的单元格）
             # 这比等待空表格更可靠
@@ -1409,26 +1645,66 @@ class PlaywrightExecutor:
                 """, timeout=10000)
                 self.logger.info("表格行数已达到最小值")
 
-                # 再等待出现包含编码的单元格
-                await target_frame.wait_for_function("""
-                    () => {
-                        const cells = document.querySelectorAll('table tbody tr td');
-                        for (const cell of cells) {
-                            const text = cell.innerText || cell.textContent || '';
-                            // 查找包含编码的单元格（通常以 C 开头，长度 > 10）
-                            if (text.trim().length > 10 && /^[A-Z0-9]/.test(text.trim())) {
-                                return true;
+                # 再等待出现真正的数据行（带有jqgrow class）
+                # 如果20秒内没有出现数据行，说明查询无结果，继续执行（会提取到0条）
+                try:
+                    # 添加轮询调试，每2秒检查一次
+                    max_wait = 20
+                    interval = 2
+                    for i in range(max_wait // interval):
+                        rows_info = await target_frame.evaluate("""
+                            () => {
+                                const allRows = document.querySelectorAll('table tbody tr');
+                                const dataRows = document.querySelectorAll('tbody tr.jqgrow');
+                                const info = {
+                                    total: allRows.length,
+                                    dataRows: dataRows.length,
+                                    classes: []
+                                };
+                                for (let j = 0; j < Math.min(5, allRows.length); j++) {
+                                    info.classes.push(allRows[j].className);
+                                }
+                                return info;
                             }
-                        }
-                        return false;
-                    }
-                """, timeout=10000)
-                self.logger.info("数据行已完全加载")
+                        """)
+                        self.logger.info(f"等待数据行 [{i*interval}s]: 总行数={rows_info['total']}, 数据行={rows_info['dataRows']}, classes={rows_info['classes']}")
+
+                        if rows_info['dataRows'] > 0:
+                            self.logger.info("数据行已完全加载（检测到jqgrow行）")
+                            break
+
+                        await asyncio.sleep(interval)
+                    else:
+                        self.logger.warning(f"等待{max_wait}秒后仍未检测到数据行")
+                except Exception as e:
+                    self.logger.warning(f"等待数据行时出错: {e}")
+                    # 继续执行，让后续提取逻辑处理0条数据的情况
 
                 #关键：额外等待确保 DOM 完全稳定并且所有行都已渲染
                 # jqGrid 可能在数据加载后还会重新渲染 DOM
                 await asyncio.sleep(2)
                 self.logger.info("额外等待 2 秒确保 DOM 稳定")
+
+                # 调试：检查实际的行结构
+                debug_info = await target_frame.evaluate("""
+                    () => {
+                        const rows = document.querySelectorAll('table tbody tr');
+                        const info = {
+                            total_rows: rows.length,
+                            row_classes: []
+                        };
+                        for (let i = 0; i < Math.min(5, rows.length); i++) {
+                            info.row_classes.push({
+                                index: i,
+                                className: rows[i].className,
+                                id: rows[i].id,
+                                cellCount: rows[i].cells.length
+                            });
+                        }
+                        return info;
+                    }
+                """)
+                self.logger.info(f"调试信息 - 总行数: {debug_info['total_rows']}, 前5行: {debug_info['row_classes']}")
             except Exception as e:
                 self.logger.warning(f"等待数据行加载超时，继续执行: {e}")
 

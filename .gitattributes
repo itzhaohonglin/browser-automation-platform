@@ -1,0 +1,23 @@
+# Git 行尾符配置
+# 确保批处理文件始终使用 Windows 格式（CRLF）
+
+# 批处理文件必须使用 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 其他文本文件使用 LF（Git 默认）
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.txt text
+*.ini text
+
+# 二进制文件
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

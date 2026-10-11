@@ -1,6 +1,6 @@
 # app/models/result.py
 from datetime import datetime
-from sqlalchemy import Integer, JSON, DateTime, ForeignKey, Index
+from sqlalchemy import Integer, JSON, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -14,10 +14,9 @@ class CrawlerResult(Base):
     # 主键
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # 外键
+    # 关联字段（不使用外键约束）
     job_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("job_queue.id"),
         nullable=False,
         comment="关联job_queue.id"
     )
@@ -36,12 +35,18 @@ class CrawlerResult(Base):
         comment="创建时间"
     )
 
-    # 关系定义
-    job: Mapped["JobQueue"] = relationship("JobQueue", back_populates="results")
+    # 关系定义（仅用于 ORM，指定外键字段）
+    job: Mapped["JobQueue"] = relationship(
+        "JobQueue",
+        back_populates="results",
+        foreign_keys=[job_id],
+        primaryjoin="CrawlerResult.job_id == JobQueue.id"
+    )
 
     # 索引
     __table_args__ = (
         Index("idx_job", "job_id"),
+        Index("idx_config", "config_id"),
     )
 
     def __repr__(self) -> str:

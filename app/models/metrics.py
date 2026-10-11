@@ -1,7 +1,7 @@
 # app/models/metrics.py
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import String, Integer, Float, Boolean, JSON, Text, DateTime, ForeignKey, Index
+from sqlalchemy import String, Integer, Float, Boolean, JSON, Text, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.models.base import Base
@@ -76,11 +76,13 @@ class AlertRule(Base):
         comment="更新时间"
     )
 
-    # 关系定义
+    # 关系定义（仅用于 ORM）
     history: Mapped[list["AlertHistory"]] = relationship(
         "AlertHistory",
         back_populates="rule",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        foreign_keys="AlertHistory.rule_id",
+        primaryjoin="AlertRule.id == AlertHistory.rule_id"
     )
 
     def __repr__(self) -> str:
@@ -95,10 +97,9 @@ class AlertHistory(Base):
     # 主键
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # 外键
+    # 关联字段（不使用外键约束）
     rule_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey('alert_rules.id'),
         nullable=False,
         comment="关联alert_rules.id"
     )
@@ -114,8 +115,18 @@ class AlertHistory(Base):
     notify_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, comment="通知状态")
     notify_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="通知错误信息")
 
-    # 关系定义
-    rule: Mapped["AlertRule"] = relationship("AlertRule", back_populates="history")
+    # 关系定义（仅用于 ORM，指定外键字段）
+    rule: Mapped["AlertRule"] = relationship(
+        "AlertRule",
+        back_populates="history",
+        foreign_keys=[rule_id],
+        primaryjoin="AlertHistory.rule_id == AlertRule.id"
+    )
+
+    # 索引
+    __table_args__ = (
+        Index("idx_rule_id", "rule_id"),
+    )
 
     def __repr__(self) -> str:
         return f"<AlertHistory(id={self.id}, rule_id={self.rule_id}, status={self.notify_status})>"

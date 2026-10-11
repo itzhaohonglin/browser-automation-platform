@@ -1,0 +1,253 @@
+# 客户端配置初始化和数据导入 - 快速指南
+
+## 🚀 五种导入方式对比
+
+| 方式 | 适用场景 | 难度 | 推荐指数 |
+|------|---------|------|---------|
+| **Web 界面** | 首次使用、少量数据 | ⭐ 简单 | ⭐⭐⭐⭐⭐ |
+| **初始化脚本** | 快速体验示例 | ⭐ 简单 | ⭐⭐⭐⭐⭐ |
+| **批量导入** | 大量任务导入 | ⭐⭐ 中等 | ⭐⭐⭐⭐ |
+| **API 调用** | 系统集成 | ⭐⭐⭐ 较难 | ⭐⭐⭐ |
+| **数据库操作** | 高级用户 | ⭐⭐⭐⭐ 困难 | ⭐⭐ |
+
+---
+
+## 📋 方式一：Web 界面（最简单）
+
+### 步骤
+```bash
+# 1. 启动服务
+.\startup.bat
+
+# 2. 打开浏览器
+http://127.0.0.1:8000/static/index.html
+
+# 3. 点击"配置管理" → "新增配置"
+# 4. 点击"任务管理" → "新增任务"
+```
+
+**优点**：直观、可视化、不易出错
+**缺点**：批量操作不便
+
+---
+
+## 🎯 方式二：初始化脚本（推荐新手）
+
+### 一键初始化示例配置
+
+```bash
+# 双击运行
+.\init_config.bat
+```
+
+**自动完成**：
+- ✅ 创建 NHSA 注册证号查询配置
+- ✅ 配置输入框、字段映射、详情采集
+- ✅ 设置优先级和超时参数
+
+**查看结果**：
+```bash
+# 启动服务
+.\startup.bat
+
+# 访问看板查看配置（通常 config_id = 44）
+http://127.0.0.1:8000/static/index.html
+```
+
+---
+
+## 📊 方式三：批量导入（推荐生产）
+
+### 准备导入文件（TXT 或 CSV，每行一个注册证号）
+
+**步骤 1：创建导入目录**
+```bash
+mkdir import_data
+```
+
+**步骤 2：准备导入文件** (`import_data\jobs.txt`)
+
+```
+滇械注准20192140008
+京械注准20210001234
+沪械注准20200005678
+```
+
+CSV 文件同样支持（每行一个注册证号）：
+```csv
+滇械注准20192140008
+京械注准20210001234
+```
+
+**注意**：
+- 每行一个注册证号
+- 以 # 开头的行会被忽略
+- 需先运行 `init_config.bat` 创建采集配置（通常 config_id = 44）
+- 暂不支持 Excel 文件，请将 Excel 另存为 CSV 后导入
+
+**步骤 3：执行导入**
+```bash
+.\batch_import.bat
+# 输入文件名：jobs.txt
+```
+
+---
+
+## 💻 完整使用流程
+
+### 场景：首次部署 + 导入 100 个任务
+
+```bash
+# === 第一步：安装 ===
+.\install.bat
+# 按提示配置数据库、安装浏览器驱动
+
+# === 第二步：初始化示例配置 ===
+.\init_config.bat
+# 创建 NHSA 配置（config_id 通常为 44）
+
+# === 第三步：查看配置ID ===
+.\startup.bat
+# 访问 http://127.0.0.1:8000/static/index.html
+# 在"配置管理"中查看 config_id
+# 按 Ctrl+C 停止服务
+
+# === 第四步：准备导入数据 ===
+# 创建 import_data\jobs.txt
+# 每行填入一个注册证号
+
+# === 第五步：批量导入 ===
+.\batch_import.bat
+# 输入：jobs.txt
+
+# === 第六步：启动服务，自动执行 ===
+.\startup.bat
+# 访问看板查看任务执行进度
+```
+
+---
+
+## 🔍 如何获取 config_id
+
+### 方法 1：Web 界面查看
+```
+1. 访问：http://127.0.0.1:8000/static/index.html
+2. 点击"配置管理"
+3. 查看 ID 列
+```
+
+### 方法 2：数据库查询
+```sql
+SELECT id, config_name, is_active
+FROM crawler_configs
+WHERE is_active = 1;
+```
+
+### 方法 3：API 查询
+```bash
+curl http://127.0.0.1:8000/api/configs
+```
+
+---
+
+## 📝 query_params 格式要求
+
+### 规则
+- 必须是有效的 JSON 对象
+- 键名与配置中 `input_configs` 的 `param_name` 对应
+
+### 示例
+
+**单个参数**：
+```json
+{"registration_no": "滇械注准20192140008"}
+```
+
+**多个参数**：
+```json
+{
+  "registration_no": "滇械注准20192140008",
+  "keyword": "医用耗材",
+  "category": "三类"
+}
+```
+
+---
+
+## ❓ 常见问题
+
+### Q1: 批量导入失败
+**检查**：
+- ✅ 是否已运行 init_config.bat 创建配置（config_id = 44）
+- ✅ 文件格式是否正确（每行一个注册证号）
+- ✅ 文件编码是否为 UTF-8
+- ✅ 数据库连接是否正常
+
+**调试**：
+```bash
+# 命令行直接执行导入查看详细错误
+browser-automation-platform.exe --import-jobs import_data\jobs.txt
+```
+
+### Q2: 如何修改已导入的任务
+**方法 1：Web 界面**
+```
+访问看板 → 任务管理 → 编辑任务
+```
+
+**方法 2：数据库**
+```sql
+UPDATE job_queue
+SET query_params = '{"registration_no":"新值"}'
+WHERE id = 123;
+```
+
+### Q3: 如何重置失败任务
+```sql
+UPDATE job_queue
+SET status = 'PENDING', error_msg = NULL, retry_count = 0
+WHERE status = 'FAILED';
+```
+
+---
+
+## 📁 打包后的目录结构
+
+```
+dist/browser-automation-platform/
+├── browser-automation-platform.exe          # 主程序（内置初始化与导入功能）
+├── _internal/                               # 程序依赖与内置资源
+├── import_data/                             # ⭐ 导入数据目录
+│   └── README.txt                          # 使用说明
+├── init_config.bat                          # ⭐ 一键初始化配置
+├── batch_import.bat                         # ⭐ 一键批量导入
+├── startup.bat                              # 启动服务
+└── install.bat                              # 首次安装
+```
+
+---
+
+## 🎯 推荐工作流
+
+### 新项目启动
+1. `install.bat` - 首次安装
+2. `init_config.bat` - 初始化示例配置
+3. 访问 Web 界面测试功能
+4. 准备批量数据
+5. `batch_import.bat` - 批量导入
+
+### 日常使用
+1. 准备 TXT/CSV 文件（每行一个注册证号）
+2. 放入 `import_data\` 目录
+3. 运行 `batch_import.bat`
+4. 访问看板查看执行
+
+### 定期维护
+- 清理历史数据（6个月前）
+- 检查失败任务并重试
+- 备份数据库和登录态
+
+---
+
+**更新日期**：2026-10-01
+**详细文档**：`docs\CLIENT_DATA_IMPORT_GUIDE.md`

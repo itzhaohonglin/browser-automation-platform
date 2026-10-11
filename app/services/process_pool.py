@@ -24,8 +24,13 @@ def _execute_job_in_process(job_id: int) -> dict:
     """
     # Import here to avoid circular dependencies
     import asyncio
+    import sys
     from app.services.executor import PlaywrightExecutor
     from app.core.database import get_session
+
+    # Windows 平台设置事件循环策略
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
     async def run_job():
         """异步执行任务"""
@@ -34,9 +39,24 @@ def _execute_job_in_process(job_id: int) -> dict:
             result = await executor.execute_job(job_id, session)
             return result
 
-    # 在子进程中运行异步任务
-    result = asyncio.run(run_job())
-    return result
+    # 创建新的事件循环并在执行完成后正确清理
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(run_job())
+        return result
+    finally:
+        # 清理所有待处理的任务
+        try:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
+        finally:
+            loop.close()
 
 
 class ProcessPoolManager:

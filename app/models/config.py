@@ -71,11 +71,13 @@ class CrawlerConfig(Base):
         comment="删除时间（逻辑删除）"
     )
 
-    # 关系定义（一对多：一个配置对应多个任务）
+    # 关系定义（一对多：一个配置对应多个任务，仅用于 ORM）
     jobs: Mapped[list["JobQueue"]] = relationship(
         "JobQueue",
         back_populates="config",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        foreign_keys="JobQueue.config_id",
+        primaryjoin="CrawlerConfig.id == JobQueue.config_id"
     )
 
     # 索引

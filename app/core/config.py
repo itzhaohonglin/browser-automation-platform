@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
 import os
+import sys
 
 
 class Settings(BaseSettings):
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
 
     # 数据库配置 - 必须通过环境变量提供
     # MySQL 示例: mysql+aiomysql://user:password@host:3306/database?charset=utf8mb4
-    # SQL Server 示例: mssql+aioodbc://user:password@host:1433/database?driver=ODBC+Driver+17+for+SQL+Server
+    # SQL Server 示例 (异步): mssql+aioodbc://user:password@host:1433/database?driver=ODBC+Driver+17+for+SQL+Server
     DATABASE_URL: str
 
     # 应用配置
@@ -31,6 +32,9 @@ class Settings(BaseSettings):
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[str] = None
+
+    # 任务调度配置
+    DISPATCH_INTERVAL_MINUTES: int = 30  # 待处理任务分发间隔（分钟）
 
     # 告警邮件配置
     SMTP_HOST: str = "smtp.example.com"
@@ -57,8 +61,41 @@ class Settings(BaseSettings):
         # 确保必要目录存在
         os.makedirs(self.AUTH_FILES_DIR, exist_ok=True)
         if self.LOG_FILE:
-            os.makedirs(os.path.dirname(self.LOG_FILE), exist_ok=True)
+            log_dir = os.path.dirname(self.LOG_FILE)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
 
 
-# 全局配置实例
-settings = Settings()
+# 全局配置实例 - 带友好的错误提示
+try:
+    settings = Settings()
+except Exception as e:
+    error_msg = str(e)
+
+    # 检查是否是缺少 .env 文件的错误
+    if "DATABASE_URL" in error_msg and "required" in error_msg:
+        print("\n" + "="*60)
+        print("  Configuration Error")
+        print("="*60)
+        print("\n[ERROR] Configuration file .env not found or incomplete")
+        print("\nPlease follow these steps:")
+        print("  1. Run install.bat for first-time setup")
+        print("  2. Or manually create .env file from .env.example")
+        print("  3. Configure DATABASE_URL in .env file")
+        print("\nExample configuration:")
+        print("  DATABASE_URL=mssql+aioodbc://sa:YourPassword@localhost:1433/bap?driver=ODBC+Driver+17+for+SQL+Server")
+        print("\n" + "="*60)
+        print("\nPress Enter to exit...")
+        input()
+        sys.exit(1)
+    else:
+        # 其他配置错误
+        print("\n" + "="*60)
+        print("  Configuration Error")
+        print("="*60)
+        print(f"\n[ERROR] {error_msg}")
+        print("\nPlease check your .env file for errors.")
+        print("\n" + "="*60)
+        print("\nPress Enter to exit...")
+        input()
+        sys.exit(1)

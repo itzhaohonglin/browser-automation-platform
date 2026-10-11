@@ -12,7 +12,7 @@ sys.path.insert(0, str(project_root))
 
 @pytest.fixture(scope="session")
 def event_loop_policy():
-    """Set event loop policy for Windows"""
+    """Set event loop policy for Windows（Proactor 支持子进程，Playwright 需要）"""
     if sys.platform == "win32":
         import asyncio
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        return asyncio.WindowsProactorEventLoopPolicy()
