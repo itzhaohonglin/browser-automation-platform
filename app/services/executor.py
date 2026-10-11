@@ -694,6 +694,9 @@ class PlaywrightExecutor:
             click_timeout = detail_config.get('timeout', {}).get('click', 10000)
             click_method = detail_config.get('click_method', 'default')
 
+            # 限流检查：点击详情
+            await self._rate_limit_check("点击详情")
+
             if click_method == 'javascript':
                 # 使用JavaScript点击，避免元素遮挡问题
                 self.logger.info(f"[详情] 使用JavaScript点击方法")
@@ -1236,6 +1239,10 @@ class PlaywrightExecutor:
 
             # 7. 点击下一页
             self.logger.info("[详情] 点击下一页按钮")
+
+            # 限流检查：详情翻页
+            await self._rate_limit_check("详情翻页")
+
             await next_button.click(timeout=timeouts['click'])
 
             if self.ws_manager:
@@ -1332,6 +1339,10 @@ class PlaywrightExecutor:
 
             # 5. 点击下一页
             self.logger.info("点击下一页按钮")
+
+            # 限流检查：翻页
+            await self._rate_limit_check("翻页")
+
             await next_button.click(timeout=TIMEOUTS['click'])
 
             # 节点 7: 翻页动作
@@ -1515,6 +1526,9 @@ class PlaywrightExecutor:
             )
 
             # 4. 访问目标 URL
+            # 限流检查：访问页面
+            await self._rate_limit_check("访问页面")
+
             await page.goto(config.target_url, timeout=timeouts['page_load'], wait_until='networkidle')
             self.logger.info(f"访问目标 URL: {config.target_url}")
 
@@ -1610,6 +1624,9 @@ class PlaywrightExecutor:
                 await self._broadcast_log("info", "表单填充完成")
 
             # 7. 点击提交按钮（在 operation_frame 中）
+            # 限流检查：点击查询
+            await self._rate_limit_check("点击查询")
+
             self.logger.info(f"点击提交按钮: {config.submit_selector}")
             await operation_frame.click(config.submit_selector, timeout=timeouts['click'])
             await self._broadcast_log("info", "点击提交按钮")
@@ -1923,6 +1940,10 @@ class PlaywrightExecutor:
 
                         # 点击下一页
                         self.logger.info("点击下一页按钮")
+
+                        # 限流检查：翻页
+                        await self._rate_limit_check("翻页")
+
                         await next_button.click(timeout=timeouts['click'])
 
                         if job_id:
