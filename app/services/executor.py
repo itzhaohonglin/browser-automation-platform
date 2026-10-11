@@ -349,6 +349,34 @@ class PlaywrightExecutor:
         except Exception as e:
             self.logger.error(f"Failed to broadcast log: {e}")
 
+    async def _rate_limit_check(self, operation_name: str = "请求"):
+        """
+        执行限流检查
+
+        Args:
+            operation_name: 操作名称（用于日志）
+        """
+        if not self._request_limiter:
+            return
+
+        try:
+            wait_time = await self._request_limiter.acquire()
+
+            if wait_time > 0:
+                # 记录等待日志
+                self.logger.info(
+                    f"[限流] {operation_name} - 等待 {wait_time:.1f} 秒"
+                )
+
+                # WebSocket 推送
+                if self.ws_manager:
+                    await self._broadcast_log(
+                        "info",
+                        f"[限流] 等待 {wait_time:.1f} 秒（请求频率控制）"
+                    )
+        except Exception as e:
+            self.logger.error(f"[限流] 限流器异常: {e}，跳过限流检查")
+
     async def _fill_form(
         self,
         page: Union[Page, Frame],
