@@ -11,7 +11,6 @@ from app.core.database import get_session
 from app.models.job import JobQueue, JobStatus
 from app.services.alert_engine import alert_engine
 from app.services.process_pool import ProcessPoolManager
-from app.services.rate_limiter import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +82,9 @@ class TaskScheduler:
 
         逻辑：
         1. 检查是否有大量 pending 任务未处理，如果有则跳过重试
-        2. 检查限流压力，如果接近上限则跳过重试
-        3. 查询失败时间超过最小等待时间的任务
-        4. 将状态重置为 'pending'，清空 error_msg
-        5. 保留 retry_count（由执行器在失败时递增）
+        2. 查询失败时间超过最小等待时间的任务
+        3. 将状态重置为 'pending'，清空 error_msg
+        4. 保留 retry_count（由执行器在失败时递增）
         """
         self.logger.info("开始扫描失败任务...")
 
@@ -110,19 +108,7 @@ class TaskScheduler:
 
                 self.logger.info(f"当前 pending 任务数: {pending_count}，继续重试流程")
 
-                # 步骤2：检查限流压力（如果启用）
-                if settings.RETRY_RESPECT_RATE_LIMIT:
-                    rate_limit_status = await rate_limiter.get_status()
-                    if rate_limit_status.get('enabled'):
-                        utilization = rate_limit_status['current_count'] / rate_limit_status['max_tasks']
-                        if utilization > 0.8:  # 使用率超过80%
-                            self.logger.warning(
-                                f"限流使用率过高 ({utilization*100:.1f}%)，"
-                                f"跳过失败任务重试，避免加重限流压力"
-                            )
-                            return
-
-                # 步骤3：查询符合条件的失败任务
+                # 步骤2：查询符合条件的失败任务
                 from datetime import datetime, timedelta
                 min_wait_time = datetime.now() - timedelta(minutes=settings.RETRY_MIN_WAIT_MINUTES)
 
@@ -144,7 +130,7 @@ class TaskScheduler:
                     f"开始重置状态"
                 )
 
-                # 步骤4：逐个重置任务状态
+                # 步骤3：逐个重置任务状态
                 for job in failed_jobs:
                     job.status = JobStatus.PENDING
                     job.error_msg = None
@@ -155,7 +141,7 @@ class TaskScheduler:
                         f"失败时间: {job.updated_at})"
                     )
 
-                # 步骤5：批量提交所有更改
+                # 步骤4：批量提交所有更改
                 try:
                     await session.commit()
                     self.logger.info(f"成功重置 {len(failed_jobs)} 个失败任务")
@@ -246,22 +232,9 @@ class TaskScheduler:
                 dispatched_count = 0
                 for job in pending_jobs:
                     try:
-                        # 检查限流
-                        can_execute = await rate_limiter.can_execute(job.config_id)
-                        if not can_execute:
-                            wait_time = await rate_limiter.get_wait_time(job.config_id)
-                            logger.info(
-                                f"任务 #{job.id} (config_id={job.config_id}) 因限流跳过，"
-                                f"需等待 {wait_time} 秒"
-                            )
-                            continue
-
                         # 更新任务状态为 processing
                         job.status = JobStatus.PROCESSING
                         await session.commit()
-
-                        # 记录限流执行
-                        await rate_limiter.record_execution(job.config_id)
 
                         # 提交任务到进程池
                         await self.pool_manager.submit_job(job.id)
