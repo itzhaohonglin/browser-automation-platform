@@ -18,3 +18,22 @@ async def test_first_request_passes_immediately():
 
     assert wait_time == 0.0, "首次请求应返回 0.0"
     assert elapsed < 0.1, "首次请求应立即通过"
+
+
+@pytest.mark.asyncio
+async def test_second_request_waits():
+    """第二个请求如果间隔不足，应等待"""
+    limiter = PlaywrightExecutor.RequestRateLimiter(interval_seconds=2.0)
+
+    # 首次请求
+    await limiter.acquire()
+
+    # 立即发起第二次请求（间隔不足）
+    start = datetime.now()
+    wait_time = await limiter.acquire()
+    elapsed = (datetime.now() - start).total_seconds()
+
+    # 应该等待约 2 秒
+    assert wait_time >= 1.9, f"应等待约 2 秒，实际返回 {wait_time}"
+    assert elapsed >= 1.9, f"实际等待时间应 >= 1.9 秒，实际 {elapsed}"
+    assert elapsed < 2.2, f"等待时间不应超过 2.2 秒，实际 {elapsed}"
