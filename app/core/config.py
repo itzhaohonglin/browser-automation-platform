@@ -42,17 +42,10 @@ class Settings(BaseSettings):
     # 智能重试配置
     RETRY_MIN_WAIT_MINUTES: int = 60  # 失败后至少等待多久才重试（分钟）
     RETRY_SKIP_IF_PENDING_OVER: int = 100  # 如果pending任务超过此数量，跳过重试
-    RETRY_RESPECT_RATE_LIMIT: bool = True  # 重试时是否遵守限流
 
     # 进程池配置
     MAX_WORKERS: int = 3  # 最大工作进程数（并发任务数）
     WORKER_MEMORY_LIMIT_MB: int = 512  # 工作进程内存限制（MB）
-
-    # 限流配置
-    RATE_LIMIT_ENABLED: bool = False  # 是否启用限流
-    RATE_LIMIT_WINDOW_MINUTES: int = 60  # 限流时间窗口（分钟）
-    RATE_LIMIT_MAX_TASKS: int = 100  # 时间窗口内最多执行的任务数
-    RATE_LIMIT_PER_CONFIG: bool = False  # 是否按配置ID分别限流
 
     # 告警邮件配置
     SMTP_HOST: str = "smtp.example.com"
