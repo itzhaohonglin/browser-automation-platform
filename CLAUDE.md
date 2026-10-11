@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 支持多站点登录态隔离和持久化
 - 失败任务自动补跑（可配置重试间隔和次数）
 - 进程池并发执行（可配置工作进程数）
-- **速率限流控制（可配置时间窗口和任务数，防止被封禁）**
+- **请求级限流控制（可配置每个 HTTP 请求间隔，防止被封禁）**
 - WebSocket 实时推送任务状态和日志
 - 支持复杂页面（多层 iframe、详情弹窗、分页）
 
@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # === 首次安装 ===
-install.bat                # 配置环境变量和数据库连接（包含限流配置提示）
+install.bat                # 配置环境变量和数据库连接
 init_database.bat          # 创建数据库表结构
 install_browser.bat        # 安装 Playwright Chromium 浏览器
 init_config.bat            # 初始化 NHSA 采集配置
@@ -553,7 +553,8 @@ if sys.platform == "win32":
 ├─ RETRY_INTERVAL_MINUTES    # 失败任务重试间隔（分钟，默认30）
 ├─ MAX_RETRY_COUNT           # 最大重试次数（默认3）
 ├─ RETRY_BATCH_SIZE          # 每批重试任务数量（默认100）
-└─ DISPATCH_INTERVAL_MINUTES # 任务分发间隔（分钟，默认30）
+├─ RETRY_MIN_WAIT_MINUTES    # 失败后至少等待多久才重试（分钟，默认60）
+└─ RETRY_SKIP_IF_PENDING_OVER # pending任务超过此数量则跳过重试（默认100）
 
 alembic.ini                  # Alembic 配置（勿修改）
 auth_files/                  # 登录态存储目录
@@ -582,10 +583,6 @@ WORKER_MEMORY_LIMIT_MB=512
 
 #### 任务调度配置
 ```bash
-# 待处理任务分发间隔（分钟）
-DISPATCH_INTERVAL_MINUTES=30
-# 建议值：保持默认，任务会在进程空闲时自动分发
-
 # 失败任务重试间隔（分钟）
 RETRY_INTERVAL_MINUTES=30
 # 建议值：快速重试 5-10 分钟，正常 30 分钟，低频 60 分钟
@@ -603,7 +600,7 @@ RETRY_BATCH_SIZE=100
 ```bash
 # 失败后至少等待多久才重试（分钟）
 RETRY_MIN_WAIT_MINUTES=60
-# 建议值：根据任务总量和限流计算
+# 建议值：根据任务总量计算
 # 公式：预计全量任务耗时 × 0.8
 # 示例：1000个任务需16小时 → 设置为 800 分钟
 
@@ -611,61 +608,83 @@ RETRY_MIN_WAIT_MINUTES=60
 RETRY_SKIP_IF_PENDING_OVER=100
 # 建议值：总任务数 × 0.1
 # 作用：优先处理新任务，避免重试任务竞争
-
-# 重试时是否遵守限流
-RETRY_RESPECT_RATE_LIMIT=true
-# 建议值：true（避免重试加重限流压力）
 ```
 
 **智能重试机制**：
 - ✅ 检查 pending 队列，如果过多则延迟重试
-- ✅ 检查限流压力，如果 >80% 则跳过重试
 - ✅ 只重试失败时间超过最小等待时间的任务
 - ✅ 优先保证新任务执行，避免队列竞争
 - 📖 详细说明：`docs/smart_retry_optimization.md`
 
-#### 限流控制配置
-```bash
-# 是否启用限流
-RATE_LIMIT_ENABLED=true
-# 建议：目标网站有访问频率限制时必须启用
+#### 请求级限流配置
 
-# 时间窗口（分钟）
-RATE_LIMIT_WINDOW_MINUTES=60
-# 建议值：30-120 分钟
+**配置方式**：在 `extraction_config` JSON 字段中配置请求级限流，控制每个 HTTP 请求之间的间隔时间。
 
-# 时间窗口内最多执行的任务数
-RATE_LIMIT_MAX_TASKS=100
-# 建议值：根据目标网站的限制设置，通常 50-300
-
-# 是否按配置ID分别限流
-RATE_LIMIT_PER_CONFIG=false
-# true=每个配置独立计数，false=全局统一计数
-# 建议：多站点采集时设为 true
+**数据库配置示例**：
+```python
+config.extraction_config = {
+    "request_rate_limit": {
+        "enabled": True,
+        "interval_seconds": 5  # 每个 HTTP 请求间隔 5 秒
+    }
+}
 ```
 
-**限流示例**：
-- **严格限流**：`RATE_LIMIT_WINDOW_MINUTES=60, RATE_LIMIT_MAX_TASKS=50`（每小时50个任务）
-- **中等限流**：`RATE_LIMIT_WINDOW_MINUTES=60, RATE_LIMIT_MAX_TASKS=100`（每小时100个任务）
-- **宽松限流**：`RATE_LIMIT_WINDOW_MINUTES=60, RATE_LIMIT_MAX_TASKS=300`（每小时300个任务）
+**参数说明**：
+- `enabled` (boolean): 是否启用请求级限流，默认 `false`
+- `interval_seconds` (float): 每个 HTTP 请求之间的最小间隔时间（秒）
 
-**限流监控**：
-```bash
-# 查询限流状态
-curl http://localhost:8000/api/rate-limit/status
+**限流作用点**：
+- 访问页面 (`page.goto`)
+- 点击查询按钮
+- 点击详情按钮
+- 翻页操作
+- 详情内翻页
 
-# 查询特定配置的限流状态
-curl http://localhost:8000/api/rate-limit/status?config_id=44
+**使用场景**：
+- 防止因请求频率过高被目标网站封禁
+- 模拟人工操作速度
+- 控制服务器负载
+- 遵守目标网站的访问频率限制
 
-# 重置限流计数器（紧急情况使用）
-curl -X POST http://localhost:8000/api/rate-limit/reset
+**配置示例**：
+```python
+# 严格限流：每 10 秒一个请求
+config.extraction_config = {
+    "request_rate_limit": {
+        "enabled": True,
+        "interval_seconds": 10
+    }
+}
+
+# 中等限流：每 5 秒一个请求
+config.extraction_config = {
+    "request_rate_limit": {
+        "enabled": True,
+        "interval_seconds": 5
+    }
+}
+
+# 宽松限流：每 2 秒一个请求
+config.extraction_config = {
+    "request_rate_limit": {
+        "enabled": True,
+        "interval_seconds": 2
+    }
+}
+
+# 禁用限流
+config.extraction_config = {
+    "request_rate_limit": {
+        "enabled": False
+    }
+}
 ```
 
 **重要提示**：
-- 修改 .env 文件后必须重启应用才能生效
-- 详细配置说明请参考：
-  - `docs/env_config_update.md` - 基础配置指南
-  - `docs/rate_limit_guide.md` - 限流配置详细指南
+- 修改配置后立即生效，无需重启应用
+- 限流在单个任务执行过程中生效
+- 不同任务之间的限流互不影响
 
 
 ### 常见陷阱
@@ -745,10 +764,9 @@ curl -X POST http://localhost:8000/api/rate-limit/reset
 ### 配置指南
 - `docs/nhsa_registration_config_guide.md` - NHSA 注册证号查询配置示例
 - `docs/nhsa_registration_test_results.md` - 配置测试报告（参考数据结构）
-- `docs/package_config_update.md` - 打包版本配置更新指南（限流、重试等新配置）
+- `docs/package_config_update.md` - 打包版本配置更新指南
 - `docs/package_config_quick_ref.md` - 打包版本配置快速参考卡片
 - `docs/env_config_update.md` - 环境变量配置更新说明
-- `docs/rate_limit_guide.md` - 限流配置详细指南
 - `docs/smart_retry_optimization.md` - 智能重试优化说明
 
 ### 设计文档
