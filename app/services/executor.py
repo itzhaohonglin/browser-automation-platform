@@ -38,36 +38,43 @@ class PlaywrightExecutor:
     class RequestRateLimiter:
         """请求级限流器（固定间隔）"""
 
-        def __init__(self, config: dict):
+        def __init__(self, interval_seconds: float):
             """
             初始化限流器
 
             Args:
-                config: 限流配置 {"enabled": bool, "interval_seconds": float}
+                interval_seconds: 每个请求之间的间隔时间（秒）
             """
-            self.enabled = config.get("enabled", False)
-            self.interval_seconds = config.get("interval_seconds", 0)
-            self.last_request_time: Optional[float] = None
+            self.interval_seconds = interval_seconds
+            self.last_request_time: Optional[datetime] = None
 
-        async def wait_if_needed(self) -> None:
-            """如果需要，等待到下一个允许的请求时间"""
-            if not self.enabled or self.interval_seconds <= 0:
-                return
+        async def acquire(self) -> float:
+            """
+            获取请求许可（如果距离上次请求时间不足，则等待）
 
+            Returns:
+                等待时间（秒）
+            """
+            now = datetime.now()
+
+            # 首次请求，直接通过
             if self.last_request_time is None:
-                # 首次请求，记录时间
-                self.last_request_time = asyncio.get_event_loop().time()
-                return
+                self.last_request_time = now
+                return 0.0
 
-            # 计算需要等待的时间
-            current_time = asyncio.get_event_loop().time()
-            elapsed = current_time - self.last_request_time
-            wait_time = self.interval_seconds - elapsed
+            # 计算距离上次请求的时间间隔
+            elapsed = (now - self.last_request_time).total_seconds()
 
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-
-            self.last_request_time = asyncio.get_event_loop().time()
+            # 如果间隔不足，需要等待
+            if elapsed < self.interval_seconds:
+                wait_seconds = self.interval_seconds - elapsed
+                await asyncio.sleep(wait_seconds)
+                self.last_request_time = datetime.now()
+                return wait_seconds
+            else:
+                # 间隔足够，直接通过
+                self.last_request_time = now
+                return 0.0
 
     def __init__(self, ws_manager=None):
         """

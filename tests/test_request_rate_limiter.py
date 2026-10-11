@@ -10,11 +10,11 @@ from app.services.executor import PlaywrightExecutor
 @pytest.mark.asyncio
 async def test_first_request_passes_immediately():
     """首次请求应立即通过，不等待"""
-    config = {"enabled": True, "interval_seconds": 2}
-    limiter = PlaywrightExecutor.RequestRateLimiter(config)
+    limiter = PlaywrightExecutor.RequestRateLimiter(interval_seconds=2)
 
     start = datetime.now()
-    await limiter.wait_if_needed()
+    wait_time = await limiter.acquire()
     elapsed = (datetime.now() - start).total_seconds()
 
+    assert wait_time == 0.0, "首次请求应返回 0.0"
     assert elapsed < 0.1, "首次请求应立即通过"
