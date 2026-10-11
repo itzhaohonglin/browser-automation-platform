@@ -85,6 +85,7 @@ class PlaywrightExecutor:
         """
         self.ws_manager = ws_manager
         self.logger = logger
+        self._request_limiter = None  # 初始化为 None，在 execute_job 中按需创建
 
     def _load_timeouts(self, config: CrawlerConfig) -> Dict:
         """
