@@ -57,3 +57,22 @@ async def test_sufficient_interval_no_wait():
 
     assert wait_time == 0.0, f"间隔足够时应返回 0.0，实际返回 {wait_time}"
     assert elapsed < 0.1, f"间隔足够时不应等待，实际等待 {elapsed}"
+
+
+@pytest.mark.asyncio
+async def test_zero_interval_no_wait():
+    """interval_seconds=0 时应无限流，所有请求立即通过"""
+    limiter = PlaywrightExecutor.RequestRateLimiter(interval_seconds=0)
+
+    # 首次请求
+    wait_time1 = await limiter.acquire()
+    assert wait_time1 == 0.0
+
+    # 连续多次请求都应立即通过
+    for i in range(3):
+        start = datetime.now()
+        wait_time = await limiter.acquire()
+        elapsed = (datetime.now() - start).total_seconds()
+
+        assert wait_time == 0.0, f"第 {i+2} 次请求应返回 0.0，实际返回 {wait_time}"
+        assert elapsed < 0.1, f"第 {i+2} 次请求不应等待，实际等待 {elapsed}"
