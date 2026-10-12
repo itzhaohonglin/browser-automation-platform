@@ -134,10 +134,7 @@ class PlaywrightExecutor:
                 "max_attempts": 2,
                 "delay_seconds": 3
             },
-            "request_rate_limit": {
-                "enabled": False,
-                "interval_seconds": 5
-            }
+            "request_rate_limit": {}  # 空字典，让 execute_job 中的混合逻辑决定
         }
 
         # 如果配置中有自定义提取配置，深度合并
@@ -1478,18 +1475,33 @@ class PlaywrightExecutor:
             timeouts = self._load_timeouts(config)
             extraction_cfg = self._load_extraction_config(config)
 
-            # 初始化请求级限流器
+            # 初始化请求级限流器（混合配置）
             rate_limit_cfg = extraction_cfg.get("request_rate_limit", {})
-            if rate_limit_cfg.get("enabled", False):
-                interval = rate_limit_cfg.get("interval_seconds", 5)
+
+            # 优先级：数据库配置 > 全局环境变量 > 硬编码默认值
+            if "enabled" in rate_limit_cfg:
+                # 数据库有明确配置，使用数据库配置
+                enabled = rate_limit_cfg["enabled"]
+                interval = rate_limit_cfg.get("interval_seconds", self.settings.REQUEST_RATE_LIMIT_INTERVAL_SECONDS)
+                config_source = "数据库配置"
+            else:
+                # 数据库未配置，使用全局环境变量
+                from app.core.config import settings
+                enabled = settings.REQUEST_RATE_LIMIT_ENABLED
+                interval = settings.REQUEST_RATE_LIMIT_INTERVAL_SECONDS
+                config_source = "全局默认"
+
+            # 初始化限流器
+            if enabled:
                 if interval <= 0:
-                    self.logger.warning("request_rate_limit.interval_seconds 必须大于 0，已禁用限流")
+                    self.logger.warning(f"[限流] interval_seconds 必须大于 0（当前: {interval}），已禁用限流")
                     self._request_limiter = None
                 else:
                     self._request_limiter = self.RequestRateLimiter(interval_seconds=interval)
-                    self.logger.info(f"[限流] 已启用请求级限流: 每 {interval} 秒一个请求")
+                    self.logger.info(f"[限流] 已启用请求级限流: 每 {interval} 秒一个请求（来源: {config_source}）")
             else:
                 self._request_limiter = None
+                self.logger.debug(f"[限流] 请求级限流已禁用（来源: {config_source}）")
 
             self.logger.info(f"开始执行任务 {job_id}，配置: {config.config_name}")
 

@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     MAX_WORKERS: int = 3  # 最大工作进程数（并发任务数）
     WORKER_MEMORY_LIMIT_MB: int = 512  # 工作进程内存限制（MB）
 
+    # 请求级限流配置（全局默认）
+    REQUEST_RATE_LIMIT_ENABLED: bool = False  # 是否启用请求级限流
+    REQUEST_RATE_LIMIT_INTERVAL_SECONDS: float = 5.0  # 请求间隔（秒）
+
     # 告警邮件配置
     SMTP_HOST: str = "smtp.example.com"
     SMTP_PORT: int = 587

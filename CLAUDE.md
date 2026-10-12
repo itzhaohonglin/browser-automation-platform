@@ -618,20 +618,56 @@ RETRY_SKIP_IF_PENDING_OVER=100
 
 #### 请求级限流配置
 
-**配置方式**：在 `extraction_config` JSON 字段中配置请求级限流，控制每个 HTTP 请求之间的间隔时间。
+控制任务执行过程中HTTP请求的频率，防止被目标网站封禁。
 
-**数据库配置示例**：
+**配置方式（两种）**：
+
+##### 方式1：全局默认配置（推荐，简单）
+
+在 `.env` 文件中配置，对所有采集配置生效：
+
+```bash
+# 启用请求级限流
+REQUEST_RATE_LIMIT_ENABLED=true
+
+# 每个请求间隔 5 秒
+REQUEST_RATE_LIMIT_INTERVAL_SECONDS=5
+```
+
+**优点**：
+- 一次配置，全局生效
+- 简单直接，符合习惯
+- 修改后重启服务即可
+
+##### 方式2：数据库配置（灵活，可覆盖）
+
+在 `crawler_configs` 表的 `extraction_config` 字段中配置，优先级高于全局配置：
+
 ```python
 config.extraction_config = {
     "request_rate_limit": {
         "enabled": True,
-        "interval_seconds": 5  # 每个 HTTP 请求间隔 5 秒
+        "interval_seconds": 10  # 每个 HTTP 请求间隔 10 秒
     }
 }
 ```
 
+**优点**：
+- 每个采集配置独立设置
+- 不同网站使用不同策略
+- 修改后立即生效
+
+**配置优先级**：
+```
+数据库配置 > 全局环境变量 > 默认值(disabled)
+```
+
+**使用建议**：
+- 大多数情况：使用 `.env` 全局配置
+- 特殊网站：在数据库中覆盖配置
+
 **参数说明**：
-- `enabled` (boolean): 是否启用请求级限流，默认 `false`
+- `enabled` (boolean): 是否启用请求级限流
 - `interval_seconds` (float): 每个 HTTP 请求之间的最小间隔时间（秒）
 
 **限流作用点**：
@@ -640,6 +676,11 @@ config.extraction_config = {
 - 点击详情按钮
 - 翻页操作
 - 详情内翻页
+
+**推荐配置**：
+- 严格限流（政府网站）：`interval_seconds: 10`
+- 中等限流（一般网站）：`interval_seconds: 5`
+- 宽松限流（内部系统）：`interval_seconds: 2`
 
 **使用场景**：
 - 防止因请求频率过高被目标网站封禁
