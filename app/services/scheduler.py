@@ -9,18 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_session
 from app.models.job import JobQueue, JobStatus
-from app.services.alert_engine import alert_engine
+from app.models.config import CrawlerConfig
 from app.services.process_pool import ProcessPoolManager
 
 logger = logging.getLogger(__name__)
 
 
 class TaskScheduler:
-    """任务调度器 - 负责定时补跑失败任务和评估告警规则"""
+    """任务调度器 - 负责定时补跑失败任务和周期性任务调度"""
 
-    # 告警评估配置（固定值）
-    ALERT_EVAL_INTERVAL_MINUTES = 5  # 告警评估间隔（分钟）
-    ALERT_FIRST_RUN_DELAY_MINUTES = 2  # 告警首次运行延迟（分钟）
     FIRST_RUN_DELAY_MINUTES = 1  # 首次运行延迟（分钟）
 
     def __init__(self, ws_manager=None, pool_manager: Optional[ProcessPoolManager] = None):
@@ -55,15 +52,6 @@ class TaskScheduler:
             next_run_time=datetime.now() + timedelta(minutes=self.FIRST_RUN_DELAY_MINUTES)
         )
 
-        # 添加定时任务：评估告警规则
-        self.scheduler.add_job(
-            func=self.evaluate_alerts,
-            trigger=IntervalTrigger(minutes=self.ALERT_EVAL_INTERVAL_MINUTES),
-            id='evaluate_alerts',
-            name='评估告警规则',
-            next_run_time=datetime.now() + timedelta(minutes=self.ALERT_FIRST_RUN_DELAY_MINUTES)
-        )
-
         # 添加定时任务：分发待处理任务
         self.scheduler.add_job(
             func=self.dispatch_pending_jobs,
@@ -71,6 +59,15 @@ class TaskScheduler:
             id='dispatch_pending_jobs',
             name='分发待处理任务',
             next_run_time=datetime.now() + timedelta(seconds=5)
+        )
+
+        # 添加定时任务：重新创建周期性任务
+        self.scheduler.add_job(
+            func=self.recreate_scheduled_jobs,
+            trigger=IntervalTrigger(minutes=settings.SCHEDULE_CHECK_INTERVAL_MINUTES),
+            id='recreate_scheduled_jobs',
+            name='重新创建周期性任务',
+            next_run_time=datetime.now() + timedelta(minutes=settings.SCHEDULE_FIRST_RUN_DELAY_MINUTES)
         )
 
         self.scheduler.start()
@@ -160,21 +157,6 @@ class TaskScheduler:
 
         except Exception as e:
             self.logger.error(f"扫描失败任务时出错: {e}", exc_info=True)
-
-    async def evaluate_alerts(self):
-        """
-        评估告警规则
-
-        定期调用告警引擎评估所有启用的告警规则。
-        """
-        self.logger.info("开始评估告警规则...")
-
-        try:
-            await alert_engine.evaluate_rules()
-            self.logger.info("告警规则评估完成")
-
-        except Exception as e:
-            self.logger.error(f"告警规则评估失败: {e}", exc_info=True)
 
     async def dispatch_pending_jobs(self):
         """
@@ -268,6 +250,92 @@ class TaskScheduler:
 
         except Exception as e:
             self.logger.error(f"扫描和分发待处理任务时出错: {e}", exc_info=True)
+
+    async def recreate_scheduled_jobs(self):
+        """
+        扫描并重新创建已完成的任务（全局机制）
+
+        逻辑：
+        1. 检查是否启用自动重新执行（AUTO_RECREATE_SUCCESS_JOBS）
+        2. 查询所有 status='success' 且完成时间超过指定间隔的任务
+        3. 为这些任务创建新的任务（复用相同的 config_id 和 query_params）
+        4. 新任务自动进入队列等待执行
+        """
+        # 检查是否启用自动重新执行
+        if not settings.AUTO_RECREATE_SUCCESS_JOBS:
+            self.logger.debug("自动重新执行功能未启用（AUTO_RECREATE_SUCCESS_JOBS=False）")
+            return
+
+        self.logger.info(
+            f"开始扫描已完成任务（间隔: {settings.AUTO_RECREATE_INTERVAL_MINUTES} 分钟）..."
+        )
+
+        try:
+            async with get_session() as session:
+                # 计算时间阈值：当前时间 - 间隔时间
+                threshold_time = datetime.now() - timedelta(
+                    minutes=settings.AUTO_RECREATE_INTERVAL_MINUTES
+                )
+
+                # 查询所有满足条件的 success 任务
+                # 条件：status='success' 且 updated_at < threshold_time
+                stmt = select(JobQueue).where(
+                    JobQueue.status == JobStatus.SUCCESS,
+                    JobQueue.updated_at < threshold_time
+                ).order_by(JobQueue.updated_at.asc())
+
+                result = await session.execute(stmt)
+                success_jobs = result.scalars().all()
+
+                if not success_jobs:
+                    self.logger.debug("没有需要重新执行的任务")
+                    return
+
+                self.logger.info(
+                    f"发现 {len(success_jobs)} 个任务需要重新执行 "
+                    f"(完成时间超过 {settings.AUTO_RECREATE_INTERVAL_MINUTES} 分钟)"
+                )
+
+                recreated_count = 0
+                for job in success_jobs:
+                    try:
+                        # 创建新任务（复用相同的配置和参数）
+                        new_job = JobQueue(
+                            config_id=job.config_id,
+                            query_params=job.query_params,
+                            priority=job.priority,
+                            status=JobStatus.PENDING
+                        )
+                        session.add(new_job)
+
+                        # 更新原任务的 updated_at，避免重复创建
+                        job.updated_at = datetime.now()
+
+                        self.logger.info(
+                            f"为任务 #{job.id} (config_id={job.config_id}) 创建新任务 "
+                            f"(原任务完成于 {job.updated_at})"
+                        )
+                        recreated_count += 1
+
+                    except Exception as e:
+                        self.logger.error(f"创建新任务失败（原任务 #{job.id}）: {e}")
+                        continue
+
+                await session.commit()
+
+                if recreated_count > 0:
+                    self.logger.info(f"成功创建 {recreated_count} 个新任务")
+
+                    # 广播消息
+                    if self.ws_manager:
+                        await self.ws_manager.broadcast({
+                            "type": "log",
+                            "level": "info",
+                            "msg": f"自动重新执行：创建了 {recreated_count} 个新任务"
+                        })
+
+        except Exception as e:
+            self.logger.error(f"重新创建任务时出错: {e}", exc_info=True)
 
     async def shutdown(self):
         """优雅停止调度器"""

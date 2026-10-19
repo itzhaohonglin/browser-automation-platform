@@ -842,6 +842,10 @@ class PlaywrightExecutor:
                     # 使用jqGrid API翻页
                     try:
                         self.logger.info("[详情] 点击下一页")
+
+                        # 限流检查：详情内翻页
+                        await self._rate_limit_check("详情内翻页")
+
                         await detail_frame.evaluate("""
                             () => {
                                 const grid = jQuery('table.ui-jqgrid-btable:first')[0];

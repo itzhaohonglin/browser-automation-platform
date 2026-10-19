@@ -16,11 +16,9 @@ from app.core.config import settings
 from app.api.endpoints import router
 from app.api.config_endpoints import router as config_router
 from app.api.metrics import router as metrics_router
-from app.api.alerts import router as alerts_router
 from app.api.config_test import router as config_test_router
 from app.api.websocket import websocket_manager
 from app.services.scheduler import TaskScheduler
-from app.services.alert_engine import alert_engine
 from app.services.process_pool import ProcessPoolManager
 
 
@@ -37,10 +35,28 @@ def get_base_path() -> Path:
 
 
 # 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+log_config = {
+    "level": getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "datefmt": "%Y-%m-%d %H:%M:%S"
+}
+
+# 如果配置了日志文件，则同时输出到文件和控制台
+if settings.LOG_FILE:
+    log_config["filename"] = settings.LOG_FILE
+    log_config["filemode"] = "a"  # 追加模式
+    log_config["encoding"] = "utf-8"
+
+logging.basicConfig(**log_config)
+
+# 如果配置了日志文件，额外添加控制台输出
+if settings.LOG_FILE:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_config["level"])
+    console_handler.setFormatter(
+        logging.Formatter(log_config["format"], datefmt=log_config["datefmt"])
+    )
+    logging.getLogger().addHandler(console_handler)
 
 # Windows 平台 Playwright 兼容性设置
 if sys.platform == "win32":
@@ -86,10 +102,6 @@ async def lifespan(app: FastAPI):
         await pool_manager.start()
         await scheduler.start()
         logger.info("调度器与进程池已启动")
-
-        # 将 WebSocket 管理器传递给告警引擎
-        alert_engine.ws_manager = websocket_manager
-        logger.info("告警引擎已配置 WebSocket 管理器")
     except Exception as e:
         logger.error(f"启动初始化失败: {e}", exc_info=True)
         # 清理部分初始化的资源
@@ -152,7 +164,6 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 app.include_router(router)
 app.include_router(config_router)
 app.include_router(metrics_router)
-app.include_router(alerts_router)
 app.include_router(config_test_router)
 
 # 注册 WebSocket 路由

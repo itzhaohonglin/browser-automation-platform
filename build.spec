@@ -49,7 +49,6 @@ a = Analysis(
 
         # 配置模板
         ('.env.example', '.'),
-        ('.env.template', '.'),
 
         # 客户端功能脚本（--init-config / --import-jobs 调用）
         ('scripts/init_nhsa_registration_config.py', 'scripts'),

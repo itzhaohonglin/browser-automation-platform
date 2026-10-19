@@ -108,28 +108,23 @@ if not exist "dist\browser-automation-platform\logs" mkdir "dist\browser-automat
 
 REM Copy client scripts
 echo [5/6] Copying client scripts...
-copy "scripts\deployment\client\*.bat" "dist\browser-automation-platform\" >nul
-copy "scripts\deployment\client\*.txt" "dist\browser-automation-platform\" >nul
+copy "client\*.bat" "dist\browser-automation-platform\" >nul
+copy "client\*.txt" "dist\browser-automation-platform\" >nul
 
 REM Create import_data directory with README
 if not exist "dist\browser-automation-platform\import_data" mkdir "dist\browser-automation-platform\import_data"
-copy "scripts\deployment\client\import_data_README.txt" "dist\browser-automation-platform\import_data\README.txt" >nul
+copy "client\import_data_README.txt" "dist\browser-automation-platform\import_data\README.txt" >nul
 
-REM Copy config templates
-echo [INFO] Copying configuration templates...
-if exist .env.template (
-    copy .env.template "dist\browser-automation-platform\.env.template" >nul
-    copy .env.template "dist\browser-automation-platform\.env.example" >nul
-    echo [OK] Copied .env.template
-) else (
-    echo [WARN] .env.template not found
-)
-
+REM Copy config template
+echo [INFO] Copying configuration template...
 if exist .env.example (
     copy .env.example "dist\browser-automation-platform\.env.example" >nul
-    echo [OK] Copied .env.example (backup)
+    copy .env.example "dist\browser-automation-platform\.env.template" >nul
+    echo [OK] Copied .env.example
 ) else (
-    echo [WARN] .env.example not found
+    echo [ERROR] .env.example not found in project root
+    pause
+    exit /b 1
 )
 
 REM Verify at least one template exists in output

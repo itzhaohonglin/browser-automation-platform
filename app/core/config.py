@@ -51,20 +51,13 @@ class Settings(BaseSettings):
     REQUEST_RATE_LIMIT_ENABLED: bool = False  # 是否启用请求级限流
     REQUEST_RATE_LIMIT_INTERVAL_SECONDS: float = 5.0  # 请求间隔（秒）
 
-    # 告警邮件配置
-    SMTP_HOST: str = "smtp.example.com"
-    SMTP_PORT: int = 587
-    SMTP_USE_TLS: bool = True
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
-    ALERT_EMAIL_FROM: Optional[str] = None
-    ALERT_EMAIL_TO: Optional[str] = None
+    # 周期性任务调度配置
+    SCHEDULE_CHECK_INTERVAL_MINUTES: int = 5  # 周期性任务检查间隔（分钟）
+    SCHEDULE_FIRST_RUN_DELAY_MINUTES: int = 2  # 首次检查延迟（分钟）
 
-    # 钉钉机器人
-    DINGTALK_WEBHOOK_URL: Optional[str] = None
-
-    # 企业微信机器人
-    WECOM_WEBHOOK_URL: Optional[str] = None
+    # 全局重新执行配置
+    AUTO_RECREATE_SUCCESS_JOBS: bool = False  # 是否自动重新执行 success 任务
+    AUTO_RECREATE_INTERVAL_MINUTES: int = 1440  # success 任务多久后重新执行（分钟，默认24小时）
 
     class Config:
         env_file = ".env"
