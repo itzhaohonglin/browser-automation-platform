@@ -108,12 +108,12 @@ if not exist "dist\browser-automation-platform\logs" mkdir "dist\browser-automat
 
 REM Copy client scripts
 echo [5/6] Copying client scripts...
-copy "client\*.bat" "dist\browser-automation-platform\" >nul
-copy "client\*.txt" "dist\browser-automation-platform\" >nul
+copy "scripts\deployment\client\*.bat" "dist\browser-automation-platform\" >nul
+copy "scripts\deployment\client\*.txt" "dist\browser-automation-platform\" >nul
 
 REM Create import_data directory with README
 if not exist "dist\browser-automation-platform\import_data" mkdir "dist\browser-automation-platform\import_data"
-copy "client\import_data_README.txt" "dist\browser-automation-platform\import_data\README.txt" >nul
+copy "scripts\deployment\client\import_data_README.txt" "dist\browser-automation-platform\import_data\README.txt" >nul
 
 REM Copy config template
 echo [INFO] Copying configuration template...

@@ -54,9 +54,11 @@ a = Analysis(
         ('scripts/init_nhsa_registration_config.py', 'scripts'),
         ('scripts/batch_import_registration_jobs.py', 'scripts'),
 
-        # 文档（可选，仅打包存在的文件）
-        ('README.md', '.'),
-        ('docs/deployment_windows.md', 'docs'),
+        # 文档（可选）
+        # 注意：PyInstaller 要求所有文件必须存在，不支持可选文件
+        # 如需添加文档，请确保文件存在后取消注释
+        # ('README.md', '.'),
+        # ('docs/*.md', 'docs'),  # 如果需要打包文档
     ],
     hiddenimports=[
         # Uvicorn 相关
