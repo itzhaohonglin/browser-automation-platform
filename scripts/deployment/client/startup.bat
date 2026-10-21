@@ -13,8 +13,8 @@ REM Check config file
 if not exist .env (
     echo [WARN] Config file .env not found
     echo Creating from template...
-    if exist .env.template (
-        copy .env.template .env >nul
+    if exist .env.example (
+        copy .env.example .env >nul
         echo [INFO] Config file created: .env
         echo [INFO] Please edit .env to configure database and port
         echo.
@@ -24,14 +24,8 @@ if not exist .env (
         echo.
         pause
         exit /b 1
-    ) else if exist .env.example (
-        copy .env.example .env >nul
-        echo [INFO] Config file created: .env
-        echo [INFO] Please edit .env to configure database and port
-        pause
-        exit /b 1
     ) else (
-        echo [ERROR] Config template not found
+        echo [ERROR] Config template (.env.example) not found
         pause
         exit /b 1
     )

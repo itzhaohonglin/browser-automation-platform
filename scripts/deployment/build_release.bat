@@ -115,26 +115,27 @@ REM Create import_data directory with README
 if not exist "dist\browser-automation-platform\import_data" mkdir "dist\browser-automation-platform\import_data"
 copy "scripts\deployment\client\import_data_README.txt" "dist\browser-automation-platform\import_data\README.txt" >nul
 
-REM Copy config template
+REM Copy config template (use Python to preserve UTF-8 encoding)
 echo [INFO] Copying configuration template...
 if exist .env.example (
-    copy .env.example "dist\browser-automation-platform\.env.example" >nul
-    copy .env.example "dist\browser-automation-platform\.env.template" >nul
-    echo [OK] Copied .env.example
+    %PYTHON% scripts\deployment\copy_utf8_file.py .env.example dist\browser-automation-platform\.env.example
+    if errorlevel 1 (
+        echo [ERROR] Failed to copy .env.example
+        pause
+        exit /b 1
+    )
+    echo [OK] Configuration template copied successfully
 ) else (
     echo [ERROR] .env.example not found in project root
     pause
     exit /b 1
 )
 
-REM Verify at least one template exists in output
-if not exist "dist\browser-automation-platform\.env.template" (
-    if not exist "dist\browser-automation-platform\.env.example" (
-        echo [ERROR] No config template found in output!
-        echo [ERROR] Please ensure .env.template or .env.example exists in project root
-        pause
-        exit /b 1
-    )
+REM Verify config template exists in output
+if not exist "dist\browser-automation-platform\.env.example" (
+    echo [ERROR] Configuration template not found in output directory!
+    pause
+    exit /b 1
 )
 
 REM Create version info

@@ -27,7 +27,7 @@ MAX_WORKERS=3
 
 ## 快速参考
 
-详细配置说明请查看 `.env.template` 文件中的注释。
+详细配置说明请查看 `.env.example` 文件中的注释。
 
 ## 配置步骤
 

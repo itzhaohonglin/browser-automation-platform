@@ -27,16 +27,12 @@ if exist .env (
     goto :step2
 )
 
-if exist .env.template (
-    copy .env.template .env >nul
-    echo [DONE] Config file created: .env
-    echo.
-) else if exist .env.example (
+if exist .env.example (
     copy .env.example .env >nul
     echo [DONE] Config file created: .env
     echo.
 ) else (
-    echo [ERROR] Config template not found
+    echo [ERROR] Config template (.env.example) not found
     pause
     exit /b 1
 )

@@ -19,9 +19,7 @@ if not exist browser-automation-platform.exe (
 
 REM Ensure config file exists (required by the main program)
 if not exist .env (
-    if exist .env.template (
-        copy .env.template .env >nul
-    ) else if exist .env.example (
+    if exist .env.example (
         copy .env.example .env >nul
     )
 )
