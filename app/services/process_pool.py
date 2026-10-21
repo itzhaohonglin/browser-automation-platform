@@ -26,18 +26,44 @@ def _execute_job_in_process(job_id: int) -> dict:
     import asyncio
     import sys
     from app.services.executor import PlaywrightExecutor
-    from app.core.database import get_session
+    from app.core.database import get_session, async_engine
 
     # Windows 平台设置事件循环策略
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
     async def run_job():
-        """异步执行任务"""
-        async with get_session() as session:
-            executor = PlaywrightExecutor()
-            result = await executor.execute_job(job_id, session)
-            return result
+        """异步执行任务（带会话管理保护）"""
+        session = None
+        try:
+            async with get_session() as session:
+                executor = PlaywrightExecutor()
+                result = await executor.execute_job(job_id, session)
+                return result
+        except asyncio.CancelledError:
+            # 任务被取消时，确保会话正确关闭
+            logger.warning(f"任务 {job_id} 被取消，正在清理会话")
+            if session:
+                try:
+                    await session.rollback()
+                    await session.close()
+                except Exception as e:
+                    logger.error(f"取消任务时关闭会话失败: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"任务 {job_id} 执行失败: {e}")
+            raise
+
+    async def cleanup_resources():
+        """清理所有异步资源"""
+        try:
+            # 关键修复：在关闭事件循环前，显式关闭数据库引擎
+            # 这会确保所有连接池中的连接都被正确关闭，避免 "Event loop is closed" 错误
+            logger.debug(f"任务 {job_id}: 正在关闭数据库引擎...")
+            await async_engine.dispose()
+            logger.debug(f"任务 {job_id}: 数据库引擎已关闭")
+        except Exception as e:
+            logger.warning(f"任务 {job_id}: 关闭数据库引擎时出错: {e}")
 
     # 创建新的事件循环并在执行完成后正确清理
     loop = asyncio.new_event_loop()
@@ -45,18 +71,40 @@ def _execute_job_in_process(job_id: int) -> dict:
     try:
         result = loop.run_until_complete(run_job())
         return result
+    except Exception as e:
+        logger.error(f"任务 {job_id} 在进程中执行失败: {e}")
+        return {"status": "failed", "error": str(e)}
     finally:
-        # 清理所有待处理的任务
+        # 清理顺序很重要：
+        # 1. 先关闭数据库引擎（释放连接池资源）
+        # 2. 再取消待处理任务
+        # 3. 最后关闭事件循环
         try:
+            # 步骤 1: 关闭数据库引擎
+            loop.run_until_complete(cleanup_resources())
+
+            # 步骤 2: 取消所有待处理的任务
             pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
             if pending:
+                logger.debug(f"任务 {job_id}: 正在取消 {len(pending)} 个待处理任务")
+                for task in pending:
+                    task.cancel()
+                # 等待所有任务完成取消
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        except Exception:
-            pass
+                logger.debug(f"任务 {job_id}: 已取消所有待处理任务")
+        except Exception as e:
+            logger.warning(f"任务 {job_id}: 清理事件循环时出错: {e}")
         finally:
-            loop.close()
+            # 步骤 3: 关闭事件循环
+            try:
+                # 给一点时间让所有回调完成
+                loop.run_until_complete(asyncio.sleep(0.1))
+            except Exception:
+                pass
+            finally:
+                logger.debug(f"任务 {job_id}: 正在关闭事件循环")
+                loop.close()
+                logger.debug(f"任务 {job_id}: 事件循环已关闭")
 
 
 class ProcessPoolManager:

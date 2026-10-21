@@ -14,9 +14,18 @@ import json
 
 def fix_config_sync():
     """同步方式修复配置"""
-    engine = create_engine(settings.DATABASE_URL.replace('aioodbc', 'pyodbc'))
+    # 创建同步引擎（一次性脚本，使用较小的连接池）
+    engine = create_engine(
+        settings.DATABASE_URL.replace('aioodbc', 'pyodbc'),
+        pool_pre_ping=True,            # 使用前检测连接有效性
+        pool_size=2,                   # 脚本只需要少量连接
+        max_overflow=1,                # 最小溢出
+        pool_recycle=600,              # 10分钟回收
+        pool_timeout=30                # 获取连接超时
+    )
 
-    with engine.connect() as conn:
+    try:
+        with engine.connect() as conn:
         # 更新输入框配置
         new_input_configs = json.dumps([{
             "selector": "input[name='regcardNm']",
@@ -53,6 +62,9 @@ def fix_config_sync():
                 print("✓ 输入框选择器已正确更新")
             else:
                 print("✗ 输入框选择器更新失败")
+    finally:
+        # 确保关闭引擎，释放连接
+        engine.dispose()
 
 if __name__ == "__main__":
     fix_config_sync()

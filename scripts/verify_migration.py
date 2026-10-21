@@ -9,8 +9,18 @@ load_dotenv()
 DATABASE_URL = os.getenv('DATABASE_URL', 'mysql+pymysql://root:root@localhost:3306/bap')
 if 'aiomysql' in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace('aiomysql', 'pymysql')
+if 'aioodbc' in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace('aioodbc', 'pyodbc')
 
-sync_engine = create_engine(DATABASE_URL)
+# 创建引擎（一次性脚本，使用较小的连接池）
+sync_engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,            # 使用前检测连接有效性
+    pool_size=2,                   # 脚本只需要少量连接
+    max_overflow=1,                # 最小溢出
+    pool_recycle=600,              # 10分钟回收
+    pool_timeout=30                # 获取连接超时
+)
 
 try:
     inspector = inspect(sync_engine)

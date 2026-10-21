@@ -730,7 +730,39 @@ config.extraction_config = {
 
 ### 常见陷阱
 
-1. **占位符替换**
+1. **数据库连接池配置**（重要！2026-10-20 优化）
+   
+   **已优化的配置（database.py）：**
+   ```python
+   async_engine = create_async_engine(
+       DATABASE_URL,
+       pool_pre_ping=True,            # 必须启用：使用前检测连接有效性
+       pool_size=10,                  # 增加到 10（支持并发）
+       max_overflow=5,                # 减少到 5（提高池管理效率）
+       pool_recycle=1200,             # 20分钟回收（避免 SQL Server 30分钟超时）
+       pool_timeout=30,               # 获取连接超时
+       pool_reset_on_return='rollback'  # 归还时自动回滚
+   )
+   ```
+   
+   **常见问题和解决方案：**
+   - ❌ `pool_recycle=3600`（1小时）→ SQL Server 30分钟空闲超时会导致连接关闭错误
+   - ✅ `pool_recycle=1200`（20分钟）→ 在超时前主动回收
+   - ❌ `pool_size=5` + `max_overflow=10` → 频繁创建/销毁连接
+   - ✅ `pool_size=10` + `max_overflow=5` → 稳定的连接池
+   
+   **监控工具：**
+   ```bash
+   # 实时监控连接池状态
+   python scripts/monitor_connection_pool.py
+   
+   # 验证配置是否正确
+   python scripts/verify_connection_pool_config.py
+   ```
+   
+   **参考文档：** `docs/database_connection_pool_optimization.md`
+
+2. **占位符替换**
    ```python
    # input_configs 中的 value 支持占位符
    "value": "{keyword}"  # 从 query_params["keyword"] 读取
