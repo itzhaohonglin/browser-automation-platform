@@ -2143,11 +2143,31 @@ class PlaywrightExecutor:
 
             # 资源清理（必须执行）
             # Cleanup in reverse order of creation to prevent resource leaks
+            # 每个清理步骤独立保护，确保即使某一步失败也不影响后续清理
             if page:
-                await page.close()
+                try:
+                    await page.close()
+                    self.logger.debug(f"任务 {job_id}: 页面已关闭")
+                except Exception as e:
+                    self.logger.warning(f"任务 {job_id}: 关闭页面失败（已忽略）: {e}")
+
             if context:
-                await context.close()
+                try:
+                    await context.close()
+                    self.logger.debug(f"任务 {job_id}: 浏览器上下文已关闭")
+                except Exception as e:
+                    self.logger.warning(f"任务 {job_id}: 关闭上下文失败（已忽略）: {e}")
+
             if browser:
-                await browser.close()
+                try:
+                    await browser.close()
+                    self.logger.debug(f"任务 {job_id}: 浏览器已关闭")
+                except Exception as e:
+                    self.logger.warning(f"任务 {job_id}: 关闭浏览器失败（已忽略）: {e}")
+
             if playwright:
-                await playwright.stop()
+                try:
+                    await playwright.stop()
+                    self.logger.debug(f"任务 {job_id}: Playwright 已停止")
+                except Exception as e:
+                    self.logger.warning(f"任务 {job_id}: 停止 Playwright 失败（已忽略）: {e}")

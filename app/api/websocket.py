@@ -1,6 +1,7 @@
 """
 WebSocket connection manager for real-time task monitoring
 """
+import asyncio
 import logging
 from typing import Set
 from fastapi import WebSocket
@@ -41,15 +42,17 @@ class WebSocketManager:
         self.active_connections.discard(websocket)
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
 
-    async def broadcast(self, message: dict):
+    async def broadcast(self, message: dict, timeout: float = 1.0):
         """
-        向所有活跃连接广播消息
+        向所有活跃连接广播消息（带超时保护）
 
         Args:
             message: 要广播的消息字典
+            timeout: 单个连接的发送超时时间（秒），默认 1.0 秒
 
         自动处理断开的连接：
         - 捕获 WebSocketDisconnect 异常
+        - 捕获发送超时异常（防止慢连接阻塞任务）
         - 捕获其他发送异常
         - 自动清理失败的连接
         """
@@ -62,7 +65,14 @@ class WebSocketManager:
 
         for connection in connections_snapshot:
             try:
-                await connection.send_json(message)
+                # 添加超时保护，防止慢连接阻塞任务执行
+                await asyncio.wait_for(
+                    connection.send_json(message),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"WebSocket 发送超时（{timeout}s），移除连接")
+                disconnected.add(connection)
             except WebSocketDisconnect:
                 logger.debug("WebSocket disconnected during broadcast")
                 disconnected.add(connection)

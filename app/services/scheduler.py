@@ -338,7 +338,48 @@ class TaskScheduler:
             self.logger.error(f"重新创建任务时出错: {e}", exc_info=True)
 
     async def shutdown(self):
-        """优雅停止调度器"""
+        """
+        优雅停止调度器
+
+        停止流程：
+        1. 暂停调度器（不再接受新任务）
+        2. 等待运行中的任务完成（最多 30 秒）
+        3. 关闭调度器
+        """
         self.logger.info("正在停止任务调度器...")
-        self.scheduler.shutdown(wait=True)
-        self.logger.info("任务调度器已停止")
+
+        try:
+            # 1. 暂停调度器（不再接受新任务）
+            self.scheduler.pause()
+            self.logger.info("调度器已暂停，等待运行中任务完成...")
+
+            # 2. 等待运行中的任务完成（最多等待 30 秒）
+            max_wait = 30
+            for i in range(max_wait):
+                running_jobs = self.scheduler.get_jobs()
+                if not running_jobs:
+                    self.logger.info("所有调度任务已完成")
+                    break
+                if i % 5 == 0:  # 每 5 秒日志一次
+                    self.logger.info(f"等待 {len(running_jobs)} 个调度任务完成...")
+                await asyncio.sleep(1)
+            else:
+                # 超时后强制继续
+                running_jobs = self.scheduler.get_jobs()
+                if running_jobs:
+                    self.logger.warning(
+                        f"等待超时（{max_wait}s），仍有 {len(running_jobs)} 个任务运行中，强制关闭"
+                    )
+
+            # 3. 关闭调度器（使用 wait=False 避免阻塞）
+            self.scheduler.shutdown(wait=False)
+            self.logger.info("任务调度器已停止")
+
+        except Exception as e:
+            self.logger.error(f"停止调度器时出错: {e}", exc_info=True)
+            # 强制关闭
+            try:
+                self.scheduler.shutdown(wait=False)
+                self.logger.info("任务调度器已强制关闭")
+            except Exception as e2:
+                self.logger.error(f"强制关闭调度器失败: {e2}")
