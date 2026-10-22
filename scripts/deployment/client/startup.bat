@@ -10,7 +10,7 @@ echo ======================================
 echo.
 
 REM Check config file
-if not exist .env (
+if exist .env goto :check_ok_1
     echo [WARN] Config file .env not found
     echo Creating from template...
     if exist .env.example (
@@ -29,7 +29,7 @@ if not exist .env (
         pause
         exit /b 1
     )
-)
+:check_ok_1
 
 REM Note: Browser driver installation
 echo [INFO] Note: First run requires Playwright browser driver

@@ -6,18 +6,18 @@ echo ======================================
 echo.
 
 REM Check if we are in the correct directory
-if not exist browser-automation-platform.exe (
+if exist browser-automation-platform.exe goto :check_ok_1
     echo [ERROR] Please run this script in the dist\browser-automation-platform directory
     pause
     exit /b 1
-)
+:check_ok_1
 
 REM Check config
-if not exist .env (
+if exist .env goto :check_ok_2
     echo [ERROR] Config file .env not found. Please run install.bat first.
     pause
     exit /b 1
-)
+:check_ok_2
 
 REM Create import_data directory if not exists
 if not exist import_data mkdir import_data
@@ -38,11 +38,11 @@ if "%FILENAME%"=="" (
     exit /b 1
 )
 
-if not exist "import_data\%FILENAME%" (
+if exist "import_data\%FILENAME%" goto :check_ok_3
     echo [ERROR] File not found: import_data\%FILENAME%
     pause
     exit /b 1
-)
+:check_ok_3
 
 echo.
 echo [INFO] Importing from: import_data\%FILENAME%

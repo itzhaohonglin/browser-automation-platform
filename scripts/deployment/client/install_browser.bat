@@ -10,19 +10,19 @@ echo ======================================
 echo.
 
 REM Check main executable
-if not exist browser-automation-platform.exe (
+if exist browser-automation-platform.exe goto :check_ok_1
     echo [ERROR] Main program not found
     echo [INFO] Please run this script in the installation directory
     pause
     exit /b 1
-)
+:check_ok_1
 
 REM Ensure config file exists (required by the main program)
-if not exist .env (
+if exist .env goto :check_ok_2
     if exist .env.example (
         copy .env.example .env >nul
     )
-)
+:check_ok_2
 
 echo [INFO] Will download about 300MB Chromium browser
 echo [INFO] Download speed depends on your network

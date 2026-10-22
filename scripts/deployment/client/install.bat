@@ -31,11 +31,14 @@ if exist .env.example (
     copy .env.example .env >nul
     echo [DONE] Config file created: .env
     echo.
-) else (
-    echo [ERROR] Config template (.env.example) not found
-    pause
-    exit /b 1
+    goto :config_ok
 )
+
+echo [ERROR] Config template (.env.example) not found
+pause
+exit /b 1
+
+:config_ok
 
 echo [IMPORTANT] Please configure the following:
 echo.

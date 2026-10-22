@@ -35,28 +35,76 @@ def get_base_path() -> Path:
 
 
 # 配置日志
-log_config = {
-    "level": getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    "datefmt": "%Y-%m-%d %H:%M:%S"
-}
+log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+log_datefmt = "%Y-%m-%d %H:%M:%S"
 
-# 如果配置了日志文件，则同时输出到文件和控制台
+# 创建 formatter
+formatter = logging.Formatter(log_format, datefmt=log_datefmt)
+
+# 配置 root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(log_level)
+
+# 如果配置了日志文件，使用 TimedRotatingFileHandler
 if settings.LOG_FILE:
-    log_config["filename"] = settings.LOG_FILE
-    log_config["filemode"] = "a"  # 追加模式
-    log_config["encoding"] = "utf-8"
+    from logging.handlers import TimedRotatingFileHandler
+    import os
 
-logging.basicConfig(**log_config)
+    # 确保日志目录存在
+    log_dir = os.path.dirname(settings.LOG_FILE)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
 
-# 如果配置了日志文件，额外添加控制台输出
-if settings.LOG_FILE:
+    # 根据配置选择轮转策略
+    if settings.LOG_ROTATION == "hourly":
+        # 按小时轮转
+        file_handler = TimedRotatingFileHandler(
+            filename=settings.LOG_FILE,
+            when="H",  # 按小时
+            interval=1,  # 每1小时
+            backupCount=settings.LOG_RETENTION_DAYS * 24,  # 保留指定天数的小时日志
+            encoding="utf-8",
+            delay=False,
+            utc=False
+        )
+        file_handler.suffix = "%Y%m%d_%H"  # 文件名后缀: YYYYMMDD_HH
+    elif settings.LOG_ROTATION == "daily":
+        # 按天轮转
+        file_handler = TimedRotatingFileHandler(
+            filename=settings.LOG_FILE,
+            when="midnight",  # 每天午夜
+            interval=1,  # 每1天
+            backupCount=settings.LOG_RETENTION_DAYS,  # 保留指定天数
+            encoding="utf-8",
+            delay=False,
+            utc=False
+        )
+        file_handler.suffix = "%Y%m%d"  # 文件名后缀: YYYYMMDD
+    else:
+        # 不轮转，使用普通 FileHandler
+        from logging import FileHandler
+        file_handler = FileHandler(
+            filename=settings.LOG_FILE,
+            mode="a",
+            encoding="utf-8"
+        )
+
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    # 同时输出到控制台
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_config["level"])
-    console_handler.setFormatter(
-        logging.Formatter(log_config["format"], datefmt=log_config["datefmt"])
-    )
-    logging.getLogger().addHandler(console_handler)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+else:
+    # 只输出到控制台
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
 
 # Windows 平台 Playwright 兼容性设置
 if sys.platform == "win32":

@@ -1,9 +1,10 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -70,6 +71,20 @@ class TaskScheduler:
             next_run_time=datetime.now() + timedelta(minutes=settings.SCHEDULE_FIRST_RUN_DELAY_MINUTES)
         )
 
+        # 添加定时任务：检测并处理超时任务
+        if settings.TASK_TIMEOUT_CHECK_ENABLED:
+            self.scheduler.add_job(
+                func=self.check_timeout_jobs,
+                trigger=IntervalTrigger(minutes=settings.TASK_TIMEOUT_CHECK_INTERVAL_MINUTES),
+                id='check_timeout_jobs',
+                name='检测超时任务',
+                next_run_time=datetime.now() + timedelta(minutes=2)
+            )
+            self.logger.info(
+                f"任务超时检测已启用（阈值: {settings.TASK_TIMEOUT_MINUTES} 分钟，"
+                f"检测间隔: {settings.TASK_TIMEOUT_CHECK_INTERVAL_MINUTES} 分钟）"
+            )
+
         self.scheduler.start()
         self.logger.info("任务调度器启动成功")
 
@@ -89,7 +104,6 @@ class TaskScheduler:
             # 获取数据库会话
             async with get_session() as session:
                 # 步骤1：检查 pending 任务数量
-                from sqlalchemy import func
                 pending_count_stmt = select(func.count(JobQueue.id)).where(
                     JobQueue.status == JobStatus.PENDING
                 )
@@ -106,7 +120,6 @@ class TaskScheduler:
                 self.logger.info(f"当前 pending 任务数: {pending_count}，继续重试流程")
 
                 # 步骤2：查询符合条件的失败任务
-                from datetime import datetime, timedelta
                 min_wait_time = datetime.now() - timedelta(minutes=settings.RETRY_MIN_WAIT_MINUTES)
 
                 stmt = select(JobQueue).where(
@@ -164,8 +177,8 @@ class TaskScheduler:
 
         逻辑：
         1. 检查进程池是否可用
-        2. 查询 status='pending' 的任务（按 priority DESC, created_at ASC 排序）
-        3. 获取进程池可用插槽数（max_workers - active_workers）
+        2. **从数据库查询真实的PROCESSING任务数（不依赖内存计数器）**
+        3. 查询 status='pending' 的任务（按 priority DESC, created_at ASC 排序）
         4. 提交任务到进程池（不超过可用插槽数）
         5. 更新任务状态为 'processing'
         6. 通过 WebSocket 广播任务状态
@@ -181,18 +194,44 @@ class TaskScheduler:
             return
 
         try:
-            # 计算可用插槽数
-            active_workers = self.pool_manager.get_active_workers()
-            available_slots = self.pool_manager.max_workers - active_workers
+            # ===关键修复：直接从数据库查询PROCESSING任务数，不依赖内存计数器===
+            # 这解决了进程池回调失败导致的计数器漂移问题
+            async with get_session() as session:
+                stmt = select(func.count()).where(JobQueue.status == JobStatus.PROCESSING)
+                result = await session.execute(stmt)
+                db_processing_count = result.scalar() or 0
+
+            # 使用数据库的真实值计算可用插槽
+            available_slots = self.pool_manager.max_workers - db_processing_count
+
+            # 同时更新内存计数器（保持一致性）
+            memory_count = self.pool_manager.get_active_workers()
+            if memory_count != db_processing_count:
+                self.logger.warning(
+                    f"进程池计数器不一致：内存={memory_count}, 数据库={db_processing_count}，"
+                    f"以数据库为准"
+                )
+                # 强制同步
+                await self.pool_manager.sync_worker_count_from_db()
 
             if available_slots <= 0:
-                self.logger.debug(f"进程池已满（{active_workers}/{self.pool_manager.max_workers}），跳过任务分发")
+                self.logger.info(
+                    f"进程池已满（数据库PROCESSING: {db_processing_count}/{self.pool_manager.max_workers}），"
+                    f"跳过任务分发"
+                )
                 return
 
-            self.logger.info(f"开始扫描待处理任务（可用插槽: {available_slots}）...")
+            self.logger.info(
+                f"开始扫描待处理任务（数据库PROCESSING: {db_processing_count}, "
+                f"可用插槽: {available_slots}）..."
+            )
 
             # 获取数据库会话
             async with get_session() as session:
+                # 关键修复：刷新会话以确保能看到最新数据
+                # 解决数据库事务隔离导致的查询返回空结果问题
+                await session.execute(select(1))  # 预热查询，刷新连接
+
                 # 查询待处理任务（按优先级和创建时间排序）
                 stmt = select(JobQueue).where(
                     JobQueue.status == JobStatus.PENDING
@@ -205,7 +244,8 @@ class TaskScheduler:
                 pending_jobs = result.scalars().all()
 
                 if not pending_jobs:
-                    self.logger.debug("没有待处理任务")
+                    # 修改为INFO级别，方便诊断
+                    self.logger.info(f"没有待处理任务（可用插槽: {available_slots}）")
                     return
 
                 self.logger.info(f"发现 {len(pending_jobs)} 个待处理任务，开始分发")
@@ -250,6 +290,80 @@ class TaskScheduler:
 
         except Exception as e:
             self.logger.error(f"扫描和分发待处理任务时出错: {e}", exc_info=True)
+
+    async def check_timeout_jobs(self):
+        """
+        检测并处理超时任务
+
+        逻辑：
+        1. 查询所有 status='processing' 且 updated_at 超过阈值的任务
+        2. 将这些任务标记为 'failed'，设置错误信息
+        3. 递增 retry_count
+        4. 这些任务会被后续的重试机制重新执行
+        """
+        self.logger.info(
+            f"开始检测超时任务（阈值: {settings.TASK_TIMEOUT_MINUTES} 分钟）..."
+        )
+
+        try:
+            async with get_session() as session:
+                # 计算超时阈值：当前时间 - 超时分钟数
+                timeout_threshold = datetime.now() - timedelta(
+                    minutes=settings.TASK_TIMEOUT_MINUTES
+                )
+
+                # 查询所有超时的 processing 任务
+                stmt = select(JobQueue).where(
+                    JobQueue.status == JobStatus.PROCESSING,
+                    JobQueue.updated_at < timeout_threshold
+                )
+
+                result = await session.execute(stmt)
+                timeout_jobs = result.scalars().all()
+
+                if not timeout_jobs:
+                    self.logger.debug("没有超时任务")
+                    return
+
+                self.logger.warning(
+                    f"发现 {len(timeout_jobs)} 个超时任务（超过 {settings.TASK_TIMEOUT_MINUTES} 分钟未完成）"
+                )
+
+                # 逐个处理超时任务
+                for job in timeout_jobs:
+                    # 计算任务已运行时长
+                    runtime_minutes = (datetime.now() - job.updated_at).total_seconds() / 60
+
+                    # 标记为失败
+                    job.status = JobStatus.FAILED
+                    job.error_msg = (
+                        f"任务执行超时（运行时长: {runtime_minutes:.1f} 分钟，"
+                        f"阈值: {settings.TASK_TIMEOUT_MINUTES} 分钟）"
+                    )
+                    job.retry_count += 1  # 递增重试次数
+                    job.updated_at = datetime.now()
+
+                    self.logger.warning(
+                        f"任务 #{job.id} 已标记为超时失败 "
+                        f"(运行时长: {runtime_minutes:.1f}分钟, "
+                        f"重试次数: {job.retry_count}/{settings.MAX_RETRY_COUNT})"
+                    )
+
+                # 批量提交所有更改
+                await session.commit()
+                self.logger.info(f"成功处理 {len(timeout_jobs)} 个超时任务")
+
+                # 广播消息
+                if self.ws_manager:
+                    for job in timeout_jobs:
+                        await self.ws_manager.broadcast({
+                            "type": "log",
+                            "level": "warning",
+                            "msg": f"任务 #{job.id} 执行超时，已自动标记为失败并等待重试"
+                        })
+
+        except Exception as e:
+            self.logger.error(f"检测超时任务时出错: {e}", exc_info=True)
 
     async def recreate_scheduled_jobs(self):
         """

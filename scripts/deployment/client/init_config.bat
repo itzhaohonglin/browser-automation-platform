@@ -10,20 +10,20 @@ echo ======================================
 echo.
 
 REM Check if main executable exists
-if not exist browser-automation-platform.exe (
+if exist browser-automation-platform.exe goto :check_ok_1
     echo [ERROR] Main program not found
     echo [INFO] Please run this script in the installation directory
     pause
     exit /b 1
-)
+:check_ok_1
 
 REM Check config file
-if not exist .env (
+if exist .env goto :check_ok_2
     echo [ERROR] Config file .env not found
     echo [INFO] Please run install.bat first
     pause
     exit /b 1
-)
+:check_ok_2
 
 echo This script will initialize sample configurations to help you get started.
 echo.

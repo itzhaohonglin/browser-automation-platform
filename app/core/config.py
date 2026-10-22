@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[str] = None
+    LOG_ROTATION: str = "daily"  # 日志轮转策略: daily(按天), hourly(按小时), none(不轮转)
+    LOG_RETENTION_DAYS: int = 30  # 日志保留天数
 
     # 任务调度配置
     DISPATCH_INTERVAL_MINUTES: int = 30  # 待处理任务分发间隔（分钟）
@@ -51,13 +53,18 @@ class Settings(BaseSettings):
     REQUEST_RATE_LIMIT_ENABLED: bool = False  # 是否启用请求级限流
     REQUEST_RATE_LIMIT_INTERVAL_SECONDS: float = 5.0  # 请求间隔（秒）
 
-    # 周期性任务调度配置
+    # 周期性任务调度配置（高级功能，默认值即可）
     SCHEDULE_CHECK_INTERVAL_MINUTES: int = 5  # 周期性任务检查间隔（分钟）
     SCHEDULE_FIRST_RUN_DELAY_MINUTES: int = 2  # 首次检查延迟（分钟）
 
-    # 全局重新执行配置
+    # 全局重新执行配置（高级功能，默认禁用）
     AUTO_RECREATE_SUCCESS_JOBS: bool = False  # 是否自动重新执行 success 任务
     AUTO_RECREATE_INTERVAL_MINUTES: int = 1440  # success 任务多久后重新执行（分钟，默认24小时）
+
+    # 任务超时检测配置
+    TASK_TIMEOUT_CHECK_ENABLED: bool = True  # 是否启用任务超时检测
+    TASK_TIMEOUT_MINUTES: int = 30  # 任务超时阈值（分钟），超过此时间的 processing 任务自动标记为 failed
+    TASK_TIMEOUT_CHECK_INTERVAL_MINUTES: int = 10  # 超时检测间隔（分钟）
 
     class Config:
         env_file = ".env"

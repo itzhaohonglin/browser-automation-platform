@@ -163,12 +163,24 @@ class ProcessPoolManager:
             )
 
             # 添加回调来更新活跃工作进程计数
+            # 关键修复：保存事件循环引用，避免回调中获取到错误的loop
+            current_loop = loop
+
             def on_complete(f):
-                loop = asyncio.get_event_loop()
-                asyncio.run_coroutine_threadsafe(
-                    self._decrement_active_workers(job_id, f),
-                    loop
-                )
+                try:
+                    # 使用保存的事件循环引用，而不是重新获取
+                    asyncio.run_coroutine_threadsafe(
+                        self._decrement_active_workers(job_id, f),
+                        current_loop
+                    )
+                except Exception as e:
+                    # 如果回调失败，记录错误并手动递减计数器
+                    logger.error(f"任务 {job_id} 回调执行失败: {e}", exc_info=True)
+                    # 使用线程安全的方式递减计数器
+                    asyncio.run_coroutine_threadsafe(
+                        self._force_decrement_worker(job_id),
+                        current_loop
+                    )
 
             future.add_done_callback(on_complete)
 
@@ -200,6 +212,22 @@ class ProcessPoolManager:
         except Exception as e:
             logger.error(f"任务 {job_id} 执行失败: {e}", exc_info=True)
 
+    async def _force_decrement_worker(self, job_id: int):
+        """
+        强制递减活跃工作进程计数（回调失败时的保险措施）
+
+        Args:
+            job_id: 任务 ID
+        """
+        async with self._lock:
+            if self._active_workers > 0:
+                self._active_workers -= 1
+                logger.warning(
+                    f"任务 {job_id} 回调失败，强制递减计数器（活跃工作进程: {self._active_workers}/{self.max_workers}）"
+                )
+            else:
+                logger.error(f"任务 {job_id} 回调失败，但计数器已经为0，无法递减")
+
     async def shutdown(self, wait: bool = True) -> None:
         """
         关闭进程池
@@ -229,6 +257,40 @@ class ProcessPoolManager:
             活跃工作进程数
         """
         return self._active_workers
+
+    async def sync_worker_count_from_db(self):
+        """
+        从数据库同步活跃工作进程计数（防止计数器漂移）
+
+        通过查询数据库中 PROCESSING 状态的任务数来校正内存中的计数器。
+        这是一个保险机制，用于修复回调失败导致的计数器不同步问题。
+        """
+        from app.core.database import get_session
+        from app.models.job import JobQueue, JobStatus
+        from sqlalchemy import select, func
+
+        try:
+            async with get_session() as session:
+                # 查询数据库中 PROCESSING 状态的任务数
+                stmt = select(func.count()).where(JobQueue.status == JobStatus.PROCESSING)
+                result = await session.execute(stmt)
+                db_processing_count = result.scalar() or 0
+
+                async with self._lock:
+                    old_count = self._active_workers
+                    # 数据库中的 PROCESSING 任务数才是真实的活跃工作进程数
+                    self._active_workers = min(db_processing_count, self.max_workers)
+
+                    if old_count != self._active_workers:
+                        logger.warning(
+                            f"进程池计数器已同步：{old_count} → {self._active_workers} "
+                            f"（数据库 PROCESSING 任务数: {db_processing_count}）"
+                        )
+                    else:
+                        logger.debug(f"进程池计数器同步检查通过: {self._active_workers}/{self.max_workers}")
+
+        except Exception as e:
+            logger.error(f"同步进程池计数器失败: {e}", exc_info=True)
 
     def get_pool_status(self) -> dict:
         """
